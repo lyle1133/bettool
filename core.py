@@ -490,6 +490,7 @@ def preprocess_text(raw: str) -> str:
         _ge_amount_from_ge, text)
     text = text.replace("各码", "各号").replace("每码", "各号").replace("号码各", "各号")
     text = text.replace("两连肖", "二连肖").replace("兩连肖", "二连肖")
+    text = re.sub(r"(平特(?:一肖|肖)?[鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:各肖|每肖)", r"\1各", text)
     text = re.sub(r"(?:各组|每组)(?=\s*\d)", "各", text)
     text = text.replace("｛", "{").replace("｝", "}")
     text = text.replace("′", ",").replace("’", ",").replace("‘", ",")
