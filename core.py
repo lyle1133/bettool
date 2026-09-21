@@ -1029,13 +1029,16 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         return [BetGroup([], amount, "平特一肖", segment, "平特一肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
-    m = re.fullmatch(rf"([二三四五]|[2-5])连([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,5}})(?:各组|每组|组|各)?{amount_re}{suffix_re}", clean)
+    m = re.fullmatch(rf"([二三四五]|[2-5])连(?:肖)?([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各组|每组|组|各)?{amount_re}{suffix_re}", clean)
     if m:
         choose = _cn_or_digit_to_int(m.group(1))
-        animals = list(m.group(2)); amount = amount_value(m.group(3))
+        animals = list(m.group(2))
+        amount = amount_value(m.group(3))
         if len(animals) == choose:
-            return [BetGroup([], amount, f"{choose}连肖", segment, f"{choose}连肖", "fixed",
-                             "".join(animals), 1)], [], True
+            return [BetGroup([], amount, f"{choose}连肖", segment, f"{choose}连肖", "fixed", "".join(animals), 1)], [], True
+        elif len(animals) > choose:
+            multiplier = comb(len(animals), choose)
+            return [BetGroup([], amount, f"{choose}连肖复试", segment, f"{choose}连肖复试", "fixed", ",".join(animals), multiplier)], [], True
 
     m = re.fullmatch(rf"([0-9])尾(?:平特一肖|平特尾|平特)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
