@@ -203,7 +203,16 @@ async function initPyodide() {
   });
   lm.textContent = "正在加载解析内核…";
   const coreSrc = await fetch("core.py").then(r => r.text());
-  await pyodide.runPythonAsync(coreSrc);
+
+  // 关键：把 core.py 写入 Pyodide 虚拟文件系统，让它成为可 import 的模块
+  pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
+  await pyodide.runPythonAsync(`
+import sys
+if "/home/pyodide" not in sys.path:
+    sys.path.insert(0, "/home/pyodide")
+import core
+`);
+
   await pyodide.runPythonAsync(PY_WRAPPER);
   coreReady = true;
 }
