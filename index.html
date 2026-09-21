@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="押注统计">
+<meta name="theme-color" content="#0e1014">
+<title>押注自动统计</title>
+<style>
+:root{
+  --bg:#0e1014; --card:#171a21; --card2:#1f242e; --btn:#232833;
+  --accent:#3b8cf5; --text:#eef0f3; --muted:#8890a0;
+  --yellow:#ffd158; --green:#59d97a; --red:#f26666;
+  --border:#2a2f3a;
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{
+  height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:15px;-webkit-text-size-adjust:100%;overflow:hidden;
+}
+body{
+  display:flex;flex-direction:column;height:100dvh;
+  padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);
+}
+header{
+  flex-shrink:0;padding:10px 12px;background:var(--card);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+header h1{font-size:15px;font-weight:600}
+#status{font-size:12px;color:var(--muted);flex:1;text-align:right}
+main{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.tab{flex:1;overflow:auto;display:none;flex-direction:column;gap:8px;padding:8px}
+.tab.active{display:flex}
+textarea,input[type=text],input[type=number]{
+  width:100%;background:var(--card);border:1px solid var(--border);
+  color:var(--text);padding:10px 12px;border-radius:8px;font-size:15px;
+  font-family:inherit;resize:vertical;outline:none;
+}
+textarea:focus,input:focus{border-color:var(--accent)}
+#raw-input{min-height:90px;flex-shrink:0}
+#preview-box{
+  background:var(--card2);border-radius:8px;padding:10px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;
+  white-space:pre-wrap;min-height:60px;flex-shrink:0;
+}
+.btn-row{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0}
+button{
+  background:var(--btn);color:var(--text);border:none;
+  padding:10px 14px;border-radius:8px;font-size:14px;
+  font-family:inherit;cursor:pointer;flex:1;min-width:0;
+  white-space:nowrap;
+}
+button:active{opacity:0.7}
+button.primary{background:var(--accent);font-weight:600}
+button.danger{background:#5a1e1e}
+#totals{font-size:13px;color:var(--yellow);padding:4px 2px}
+nav.tabbar{
+  flex-shrink:0;display:flex;background:var(--card);
+  border-top:1px solid var(--border);
+  padding-bottom:var(--safe-bottom);
+}
+nav.tabbar button{
+  flex:1;background:transparent;border-radius:0;
+  padding:12px 4px;font-size:13px;color:var(--muted);
+}
+nav.tabbar button.active{color:var(--accent)}
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{
+  background:var(--card2);padding:8px 6px;text-align:left;
+  font-weight:600;position:sticky;top:0;z-index:1;
+  border-bottom:1px solid var(--border);
+}
+.data-table td{padding:6px;border-bottom:1px solid var(--border);word-break:break-all}
+.data-table tr:last-child td{border-bottom:none}
+.setting-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.setting-row label{flex:1;font-size:14px}
+.setting-row input{width:90px;flex-shrink:0;text-align:center}
+.setting-row .unit{color:var(--muted);font-size:13px;width:24px}
+#loading{
+  position:fixed;inset:0;background:var(--bg);z-index:9999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+}
+#loading .spinner{
+  width:40px;height:40px;border:3px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin 0.8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading .msg{color:var(--muted);font-size:14px;text-align:center;padding:0 20px}
+.subtab-bar{display:flex;gap:4px;flex-shrink:0}
+.subtab-bar button{padding:8px 4px;font-size:13px}
+.subtab-bar button.active{background:var(--accent)}
+.subtab-content{flex:1;overflow:auto;background:var(--card);border-radius:8px;min-height:120px}
+.empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px}
+#year-select{
+  background:var(--btn);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:4px 6px;font-size:12px;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="msg" id="loading-msg">正在启动…</div>
+</div>
+
+<header>
+  <h1>押注统计</h1>
+  <span id="status">初始化中…</span>
+</header>
+
+<main>
+  <section class="tab active" id="tab-input">
+    <textarea id="raw-input" placeholder="粘贴下注内容…
+例：龙鸡二连肖200 / 猴30米 / 鸡狗鼠各肖10"></textarea>
+    <div id="preview-box">（等待输入）</div>
+    <div class="btn-row">
+      <button onclick="onPaste()">粘贴</button>
+      <button class="primary" onclick="onAdd()">添加</button>
+      <button onclick="onCopy()">复制</button>
+      <button class="danger" onclick="onClearInput()">清空</button>
+    </div>
+    <div id="totals"></div>
+  </section>
+
+  <section class="tab" id="tab-summary">
+    <div class="subtab-bar">
+      <button data-subtab="numbers" class="active" onclick="switchSubtab('numbers')">号码</button>
+      <button data-subtab="zodiac" onclick="switchSubtab('zodiac')">生肖</button>
+      <button data-subtab="plays" onclick="switchSubtab('plays')">玩法</button>
+      <button data-subtab="orders" onclick="switchSubtab('orders')">明细</button>
+    </div>
+    <div class="subtab-content" id="summary-content"></div>
+    <div class="btn-row">
+      <button class="danger" onclick="onClearAll()">清空全部记录</button>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-win">
+    <input type="text" id="macau-draw" placeholder="澳门开奖号码（7 个）" inputmode="numeric">
+    <input type="text" id="hk-draw" placeholder="香港开奖号码（7 个）" inputmode="numeric">
+    <div class="btn-row">
+      <button onclick="onRefreshWin()">刷新中奖</button>
+      <button class="primary" onclick="onExport()">导出 Excel</button>
+    </div>
+    <div class="subtab-content" id="win-content"></div>
+  </section>
+
+  <section class="tab" id="tab-settings">
+    <div class="subtab-bar">
+      <button data-settings-tab="odds" class="active" onclick="switchSettingsTab('odds')">赔率</button>
+      <button data-settings-tab="rebate" onclick="switchSettingsTab('rebate')">回水</button>
+    </div>
+    <div id="settings-content" style="flex:1;overflow:auto"></div>
+    <div class="btn-row">
+      <button onclick="onResetSettings()">恢复默认</button>
+      <button class="primary" onclick="onSaveSettings()">保存设置</button>
+    </div>
+  </section>
+</main>
+
+<nav class="tabbar">
+  <button data-tab="input" class="active" onclick="switchTab('input')">输入</button>
+  <button data-tab="summary" onclick="switchTab('summary')">汇总</button>
+  <button data-tab="win" onclick="switchTab('win')">中奖</button>
+  <button data-tab="settings" onclick="switchTab('settings')">设置</button>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
