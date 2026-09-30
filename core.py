@@ -782,6 +782,8 @@ def _color_special_numbers(selection_text: str) -> List[int]:
 
 
 def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[BetGroup], List[str], bool]:
+        # ⚠️ 清理来源前缀：新澳/新奥/新澳门/澳门/香港/港/门 等
+    segment = re.sub(r"^(?:\s*(?:新澳|新奥|新澳门|澳門|澳门|香港|港|老门|新门|门)\s*[:：]?\s*)+", "", segment)
     clean = re.sub(r"[\s,，、。.;；:#井@]+", "", segment)
     if not clean:
         return [], [], False
