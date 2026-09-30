@@ -1613,7 +1613,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
             if unresolved:
                 final_profit: object = "待填赔率"
                 risk_level = "[?] 待填赔率"
-                sort_profit = float("inf")
+                sort_profit = -float("inf")
             else:
                 fv = payout_total + total_rebate - base_amount
                 final_profit = fv
@@ -1633,8 +1633,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
             all_data.append((sort_profit, row))
 
     # ⚠️ 修复：升序排列，亏损最大的排最前；"待填赔率"(inf) 自动落到最后
-    all_data.sort(key=lambda item: item[0])
-
+    all_data.sort(key=lambda item: -item[0])
     profits = [item[0] for item in all_data if isinstance(item[0], (int, float)) and item[0] != float("inf")]
     if profits:
         max_p = max(profits); min_p = min(profits); avg_p = sum(profits) / len(profits)
