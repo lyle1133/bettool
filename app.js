@@ -121,7 +121,7 @@ const PY_WRAPPER = `
 import json
 from core import (
     parse_bet, parse_draw_result, settle_orders,
-    summarize_orders, export_xlsx,
+    summarize_orders, export_xlsx, build_risk_rows,
     OrderRecord, BetGroup,
 )
 
@@ -193,6 +193,13 @@ def js_export_xlsx(records_json, macau_str, hk_str, year, odds_json, rebate_json
     export_xlsx(path, recs, year, {"澳门":mac,"香港":hk}, odds, rebate)
     with open(path,"rb") as f: data = f.read()
     return base64.b64encode(data).decode("ascii")
+
+def js_risk_rows(records_json, year, odds_json, rebate_json):
+    recs = _rebuild(records_json)
+    odds = json.loads(odds_json)
+    rebate = json.loads(rebate_json)
+    rows = build_risk_rows(recs, year, odds, rebate)
+    return json.dumps(rows, ensure_ascii=False)
 `;
 
 async function initPyodide() {
@@ -242,6 +249,13 @@ async function pyExportXlsx() {
     JSON.stringify(state.records),
     $("#macau-draw").value, $("#hk-draw").value, yearAnimal(),
     JSON.stringify(state.odds), JSON.stringify(state.rebate));
+}
+async function pyRiskRows() {
+  return JSON.parse(pyCall("js_risk_rows",
+    JSON.stringify(state.records),
+    yearAnimal(),
+    JSON.stringify(state.odds),
+    JSON.stringify(state.rebate)));
 }
 
 // ==================== 输入页 ====================
@@ -411,6 +425,76 @@ async function refreshWin() {
   }
 }
 
+// ==================== 风险页 ====================
+async function refreshRisk() {
+  if (!coreReady) return;
+  const box = $("#risk-content");
+  if (!box) return;
+  if (!state.records.length) {
+    box.innerHTML = '<div class="empty">还没有记录</div>';
+    return;
+  }
+  box.innerHTML = '<div class="empty">正在计算…</div>';
+  try {
+    const rows = await pyRiskRows();
+    renderRisk(rows);
+  } catch(e) {
+    box.innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
+  }
+}
+
+function renderRisk(rows) {
+  const box = $("#risk-content");
+  if (!rows || rows.length <= 1) {
+    box.innerHTML = '<div class="empty">暂无可分析的特码相关玩法</div>';
+    return;
+  }
+
+  const head = rows[0];
+  // 分离统计摘要行
+  const summaryRow = rows.slice(1).find(r => String(r[0] || "").includes("统计"));
+  const bodyRows = rows.slice(1).filter(r => !String(r[0] || "").includes("统计"));
+
+  // 统计摘要
+  let summaryHtml = "";
+  if (summaryRow) {
+    summaryHtml = `<div class="risk-summary">
+      <span class="max">📈 最大盈亏：${summaryRow[1] || "-"}</span>
+      <span class="min">📉 最小盈亏：${summaryRow[2] || "-"}</span>
+      <span class="avg">📊 平均：${summaryRow[9] || "-"}</span>
+    </div>`;
+  }
+
+  // 表头
+  const th = head.map(h => `<th>${h}</th>`).join("");
+
+  // 数据行
+  const tr = bodyRows.map(row => {
+    const profit = row[9];
+    const level = String(row[11] || "");
+    let rowCls = "risk-unknown";
+    if (level.includes("🔴") || level.includes("高")) rowCls = "risk-high";
+    else if (level.includes("🟡") || level.includes("中")) rowCls = "risk-mid";
+    else if (level.includes("🟢") || level.includes("低")) rowCls = "risk-low";
+
+    const profitNum = typeof profit === "number" ? profit : null;
+    const profitCls = profitNum === null ? "" : (profitNum > 0 ? "profit-pos" : "profit-neg");
+    const profitText = profitNum === null ? (profit ?? "-")
+      : (profitNum > 0 ? "+" : "") + fmtNum(profitNum);
+
+    const tds = row.map((v, i) => {
+      if (i === 9) return `<td class="${profitCls}">${profitText}</td>`;
+      return `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`;
+    }).join("");
+
+    return `<tr class="${rowCls}">${tds}</tr>`;
+  }).join("");
+
+  box.innerHTML = summaryHtml
+    + `<div class="table-wrap"><table class="data-table">`
+    + `<thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+}
+
 async function onExport() {
   if (!state.records.length) { toast("没有记录"); return; }
   try {
@@ -494,6 +578,7 @@ function switchTab(name) {
   $$("nav.tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   if (name === "summary") refreshSummary();
   if (name === "win") refreshWin();
+  if (name === "risk") refreshRisk();
   if (name === "settings") renderSettings();
 }
 
