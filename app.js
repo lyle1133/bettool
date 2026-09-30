@@ -59,6 +59,8 @@ const state = {
   records: [],
   odds: { ...DEFAULT_ODDS },
   rebate: { ...DEFAULT_REBATE },
+  currentUser: "A",       // 输入时选定的用户
+  winFilterUser: "全部",  // 中奖页筛选用户
 };
 
 // ==================== 工具 ====================
@@ -96,6 +98,8 @@ function saveLocal() {
       records: state.records,
       odds: state.odds,
       rebate: state.rebate,
+      currentUser: state.currentUser,
+      winFilterUser: state.winFilterUser,
       macau: $("#macau-draw")?.value || "",
       hk: $("#hk-draw")?.value || "",
     }));
@@ -111,6 +115,8 @@ function loadLocal() {
     if (Array.isArray(data.records)) state.records = data.records;
     if (data.odds) state.odds = { ...DEFAULT_ODDS, ...data.odds };
     if (data.rebate) state.rebate = { ...DEFAULT_REBATE, ...data.rebate };
+    if (data.currentUser) state.currentUser = data.currentUser;
+    if (data.winFilterUser) state.winFilterUser = data.winFilterUser;
     if (data.macau && $("#macau-draw")) $("#macau-draw").value = data.macau;
     if (data.hk && $("#hk-draw")) $("#hk-draw").value = data.hk;
   } catch(e) { console.warn(e); }
@@ -237,9 +243,9 @@ async function pyParseBet(text) {
 async function pySummarize() {
   return JSON.parse(pyCall("js_summarize", JSON.stringify(state.records), yearAnimal()));
 }
-async function pySettle() {
+async function pySettle(records) {
   return JSON.parse(pyCall("js_settle",
-    JSON.stringify(state.records),
+    JSON.stringify(records || state.records),
     $("#macau-draw").value, $("#hk-draw").value, yearAnimal(),
     JSON.stringify(state.odds), JSON.stringify(state.rebate)));
 }
@@ -255,6 +261,23 @@ async function pyRiskRows() {
     yearAnimal(),
     JSON.stringify(state.odds),
     JSON.stringify(state.rebate)));
+}
+
+// ==================== 用户 & 筛选 ====================
+function switchUser(u) {
+  state.currentUser = u;
+  $$(".user-bar button[data-user]").forEach(b =>
+    b.classList.toggle("active", b.dataset.user === u));
+  saveLocal();
+  toast(`当前用户：${u}`);
+}
+
+function switchWinFilter(f) {
+  state.winFilterUser = f;
+  $$(".user-bar button[data-winfilter]").forEach(b =>
+    b.classList.toggle("active", b.dataset.winfilter === f));
+  saveLocal();
+  refreshWin();
 }
 
 // ==================== 输入页 ====================
@@ -312,6 +335,7 @@ async function onAdd() {
     groups: previewResult.groups,
     warnings: previewResult.warnings,
     region,
+    user: state.currentUser,
   };
   state.records.push(rec);
   $("#raw-input").value = "";
@@ -320,7 +344,7 @@ async function onAdd() {
   updateTotals();
   renderRecords();
   saveLocal();
-  toast(`已添加 #${rec.seq}: ${fmtNum(rec.amount)}`);
+  toast(`[${rec.user}] 已添加 #${rec.seq}: ${fmtNum(rec.amount)}`);
 }
 
 function onCopy() {
@@ -348,11 +372,9 @@ async function onClearAll() {
   toast("已清空");
 }
 
-// ← 新增：删除单条记录
 function deleteRecord(seq) {
   if (!confirm(`确定删除 #${seq}？`)) return;
   state.records = state.records.filter(r => r.seq !== seq);
-  // 重新编号，保持 seq 连续
   state.records.forEach((r, i) => { r.seq = i + 1; });
   saveLocal();
   updateTotals();
@@ -360,11 +382,12 @@ function deleteRecord(seq) {
   toast(`已删除 #${seq}`);
 }
 
-// ← 新增：渲染记录列表（新的在最上面）
+// 渲染记录列表（显示全部，新的在最上面）
 function renderRecords() {
   const box = $("#records-list");
   const cnt = $("#records-count");
   if (!box) return;
+
   if (cnt) cnt.textContent = state.records.length;
 
   if (!state.records.length) {
@@ -372,12 +395,14 @@ function renderRecords() {
     return;
   }
 
-  // 倒序：最新添加的显示在最上面
   const sorted = [...state.records].sort((a, b) => b.seq - a.seq);
 
   box.innerHTML = sorted.map(r => {
-    const timeShort = (r.created_at || "").slice(5, 16); // "MM-DD HH:MM"
+    const timeShort = (r.created_at || "").slice(5, 16);
+    const user = r.user || "";
+    const userTag = user ? `<span class="user" data-u="${user}">${user}</span>` : "";
     return `<div class="rec-row">
+      ${userTag}
       <span class="seq">#${r.seq}</span>
       <span class="region">${r.region || "澳门"}</span>
       <span class="time">${timeShort}</span>
@@ -437,8 +462,19 @@ async function refreshWin() {
   if (!m && !h) {
     $("#win-content").innerHTML = '<div class="empty">请输入澳门或香港开奖号码</div>'; return;
   }
+
+  // 按筛选用户过滤记录
+  const filtered = state.winFilterUser === "全部"
+    ? state.records
+    : state.records.filter(r => (r.user || "") === state.winFilterUser);
+
+  if (!filtered.length) {
+    $("#win-content").innerHTML = `<div class="empty">用户 ${state.winFilterUser} 暂无记录</div>`;
+    return;
+  }
+
   try {
-    const { summary } = await pySettle();
+    const { summary } = await pySettle(filtered);
     if (!summary || summary.length <= 1) {
       $("#win-content").innerHTML = '<div class="empty">无中奖数据</div>'; return;
     }
@@ -448,7 +484,10 @@ async function refreshWin() {
     const tr = rows.map(row => "<tr>" + row.map(v =>
       `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`
     ).join("") + "</tr>").join("");
-    $("#win-content").innerHTML = `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+    const title = state.winFilterUser === "全部" ? "" :
+      `<div style="padding:8px;color:var(--accent);font-size:13px;font-weight:600">当前筛选：用户 ${state.winFilterUser}</div>`;
+    $("#win-content").innerHTML = title +
+      `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
   } catch(e) {
     $("#win-content").innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
   }
@@ -610,7 +649,6 @@ function switchTab(name) {
 
 // ==================== 启动 ====================
 window.addEventListener("DOMContentLoaded", async () => {
-  // 年份选择器
   const yearSel = document.createElement("select");
   yearSel.id = "year-select";
   Object.keys(YEAR_MAP).forEach(k => {
@@ -624,13 +662,19 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   $("header").appendChild(yearSel);
 
-  // 输入监听
   $("#raw-input").addEventListener("input", schedulePreview);
   $("#macau-draw").addEventListener("input", saveLocal);
   $("#hk-draw").addEventListener("input", saveLocal);
 
   loadLocal();
   yearSel.value = state.year;
+
+  // 刷新用户栏和筛选栏 active
+  $$(".user-bar button[data-user]").forEach(b =>
+    b.classList.toggle("active", b.dataset.user === state.currentUser));
+  $$(".user-bar button[data-winfilter]").forEach(b =>
+    b.classList.toggle("active", b.dataset.winfilter === state.winFilterUser));
+
   renderRecords();
 
   try {
