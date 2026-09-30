@@ -791,7 +791,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     def amount_value(text: str) -> float:
         return float(cn_to_number(text)) if re.fullmatch(CN_NUMBER_RE, text or "") else float(text)
 
-    # 平特5-9尾各600
+    # ===== 1. 平特5-9尾各600 =====
     m = re.fullmatch(rf"(?:平特一肖|平特肖|平特|尾数平特|平特尾)((?:[0-9]尾)+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
         tails = re.findall(r"[0-9]尾", m.group(1))
@@ -799,7 +799,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         return [BetGroup([], amount, "尾数平特", segment, "尾数平特", "fixed",
                          ",".join(tails), len(tails))], [], True
 
-    # 七不中/六不中/五不中/六肖中
+    # ===== 2. 七不中/六不中/五不中/六肖中 =====
     m = re.fullmatch(rf"([0-9,，、.\-~]+)(七不中|六不中|五不中|六肖中){amount_re}{suffix_re}", clean)
     if m:
         return [BetGroup([], amount_value(m.group(3)), m.group(2), segment, m.group(2), "fixed", m.group(1), 1)], [], True
@@ -808,7 +808,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         return [BetGroup([], amount_value(m.group(2)), "六肖中", segment, "六肖中", "fixed",
                          ",".join(list(m.group(1))), 1)], [], True
 
-    # 波色
+    # ===== 3. 波色 =====
     m = re.fullmatch(rf"((?:(?:红波|蓝波|绿波|红|蓝|绿)(?:单|双|大|小)?)+){amount_re}{suffix_re}", clean)
     if m:
         selection = m.group(1)
@@ -818,7 +818,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             display = selection + "波" if selection in {"红", "蓝", "绿"} else selection
             return [BetGroup(nums, amount, "波色", segment, "波色", "fixed", display, 1)], [], True
 
-    # 大小单双
+    # ===== 4. 大小单双 =====
     m = re.fullmatch(rf"(?:大小单双)?(单数|双数|大数|小数|单|双|大|小){amount_re}{suffix_re}", clean)
     if m:
         cat = m.group(1)[0]
@@ -884,16 +884,17 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         selection = ",".join(fmt_code(n) for n in nums)
         return [BetGroup([], amount, play_name, segment, play_name, "fixed", selection, multiplier)], warnings, True
 
+    # ===== 5. 二中二/三中三 各组 =====
     explicit = re.fullmatch(rf"(?:平码)?(?:三中三|3中3)(.+?)(?:各组|每组|组){amount_re}{suffix_re}", clean)
     if explicit:
-        groups = re.findall(r"(?:0?[1-9]|[1-4]\d|49)(?:[-,.，、/](?:0?[1-9]|[1-4]\d|49)){{2}}", explicit.group(1))
+        groups = re.findall(r"(?:0?[1-9]|[1-4]\d|49)(?:[-,.，、/](?:0?[1-9]|[1-4]\d|49)){2}", explicit.group(1))
         amount = amount_value(explicit.group(2))
         if groups:
             selection = ";".join(groups)
             return [BetGroup([], amount, "三中三", segment, "三中三", "fixed", selection, len(groups))], [], True
     explicit = re.fullmatch(rf"(?:平码)?(?:二中二|2中2)(.+?)(?:各组|每组|组){amount_re}{suffix_re}", clean)
     if explicit:
-        groups = re.findall(r"(?:0?[1-9]|[1-4]\d|49)(?:[-,.，、/](?:0?[1-9]|[1-4]\d|49)){{1}}", explicit.group(1))
+        groups = re.findall(r"(?:0?[1-9]|[1-4]\d|49)(?:[-,.，、/](?:0?[1-9]|[1-4]\d|49)){1}", explicit.group(1))
         amount = amount_value(explicit.group(2))
         if groups:
             selection = ";".join(groups)
@@ -916,7 +917,6 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             return [], warnings, True
         multiplier = comb(len(animals), choose)
         play = f"{choose}连肖" if multiplier == 1 else f"{choose}连肖复试"
-        # 复试的 selection_text 保持逗号分隔
         return [BetGroup([], amount, play, segment, play, "fixed", ",".join(animals), multiplier)], warnings, True
 
     combo_text = re.sub(r"[\s:：]", "", segment).replace("免", "兔")
@@ -925,39 +925,70 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     def _choose_value(text: str) -> int:
         return _cn_or_digit_to_int(text)
 
+    # ===== 6. 【新增】平特一肖多肖（前置）：平特一肖:狗兔,各300 =====
+    _seg_pf = segment.replace("免", "兔")
+    _seg_pf = re.sub(r"^[\s。.;；,，、：:]+", "", _seg_pf)
     m = re.fullmatch(
-        rf"(?:复试|复式)([二三四五]|[2-5])连肖([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各组|每组|组|各)?{amount_re}{suffix_re}",
+        rf"(?:平特一肖|平特肖|平特)\s*[:：]?\s*"
+        rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+(?:[\s,，、][鼠牛虎兔龙蛇马羊猴鸡狗猪]+)*)"
+        rf"[\s,，、]*(?:各组|每组|组|各)?[\s,，、]*{amount_re}{suffix_re}",
+        _seg_pf)
+    if m:
+        _raw = m.group(1)
+        _animals: List[str] = []
+        for part in re.split(r"[\s,，、]+", _raw):
+            if not part:
+                continue
+            if all(ch in ZODIAC_ORDER for ch in part):
+                _animals.extend(list(part))
+        if _animals:
+            _amt = amount_value(m.group(2))
+            return [BetGroup([], _amt, "平特一肖", segment, "平特一肖", "fixed",
+                             ",".join(_animals), len(_animals))], [], True
+
+    # ===== 7. 复式/复试连肖（支持"两"）=====
+    m = re.fullmatch(
+        rf"(?:复试|复式)([二两三四五]|[2-5])连肖([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各组|每组|组|各)?{amount_re}{suffix_re}",
         combo_text)
     if m:
         return make_lianxiao(m.group(2), m.group(1), m.group(3))
 
-    # 逐组：用分号作为分隔，让结算能区分"固定组"和"复试"
+    # ===== 8. 【修复】逐组连肖（支持"两连"、无"肖"）=====
     m = re.fullmatch(
-        rf"(?:平特)?([二三四五]|[2-5])连肖([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,5}}(?:[,，、][鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,5}})*)(?:组)?(?:各组|每组|各)?{amount_re}{suffix_re}",
+        rf"(?:平特)?([二两三四五]|[2-5])\s*连(?:肖)?\s*[:：]?\s*"
+        rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+(?:[\s,，、][鼠牛虎兔龙蛇马羊猴鸡狗猪]+)*)"
+        rf"[\s,，、]*(?:各组|每组|组|各)?[\s,，、]*{amount_re}{suffix_re}",
         combo_text)
     if m:
-        choose = _choose_value(m.group(1))
+        choose = _cn_or_digit_to_int(m.group(1))
         selections = [x for x in re.split(r"[,，、]", m.group(2)) if x]
+        if len(selections) == 1 and len(selections[0]) > choose and len(selections[0]) % choose == 0:
+            s = selections[0]
+            selections = [s[i:i+choose] for i in range(0, len(s), choose)]
         good = [x for x in selections if len(x) == choose]
-        if len(good) == len(selections):
+        if good:
             amount = amount_value(m.group(3))
             play = f"{choose}连肖"
-            # ⚠️ 修复：用分号分隔每一组，避免被当成"复试"重新组合
+            # ⚠️ 关键：分号分隔每一组，settle_group 据此判定为"逐组"模式
             return [BetGroup([], amount, play, segment, play, "fixed",
-                             ";".join(selections), len(selections))], [], True
+                             ";".join(good), len(good))], [], True
 
+    # ===== 9. 兼容无分隔老写法 =====
     for choose in (2, 3, 4, 5):
         combo_text = re.sub(rf"(?<=[鼠牛虎兔龙蛇马羊猴鸡狗猪]{{{choose}}})组(?=[鼠牛虎兔龙蛇马羊猴鸡狗猪])", "，", combo_text)
         combo_text = re.sub(rf"(?<=[鼠牛虎兔龙蛇马羊猴鸡狗猪]{{{choose}}})组(?=(?:各组|每组|各|\d|[零〇一二两三四五六七八九十百千万]))", "", combo_text)
 
-    m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:复试)?([二三四五六七八九]|\d+)连肖(?:各)?{amount_re}{suffix_re}", clean)
+    # ===== 10. 龙鸡二连肖200 =====
+    m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:复试)?([二两三四五六七八九]|\d+)连肖(?:各)?{amount_re}{suffix_re}", clean)
     if m:
         return make_lianxiao(m.group(1), m.group(2), m.group(3))
 
-    m = re.fullmatch(rf"([二三四五六七八九]|\d+)连肖(?:复试)?([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各)?{amount_re}{suffix_re}", clean)
+    # ===== 11. 2连肖：龙,鸡 200 =====
+    m = re.fullmatch(rf"([二两三四五六七八九]|\d+)连肖(?:复试)?([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各)?{amount_re}{suffix_re}", clean)
     if m:
         return make_lianxiao(m.group(2), m.group(1), m.group(3))
 
+    # ===== 12. 各肖 =====
     def make_zodiac_split(animals_text: str, amount_text: str) -> Tuple[List[BetGroup], List[str], bool]:
         zmap = build_zodiac_map(year_animal)
         amount = amount_value(amount_text)
@@ -977,60 +1008,69 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     if m:
         return make_zodiac_split(m.group(1), m.group(2))
 
+    # ===== 13. 包肖 =====
     m = re.fullmatch(rf"(?:包肖|包)([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "特肖", segment, "特肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "特肖", segment, "特肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 14. 特肖：猴猪肖各5 =====
     m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)肖(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "特肖", segment, "特肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "特肖", segment, "特肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 15. 特肖简写：猴30 / 狗牛各15 =====
     m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "特肖", segment, "特肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "特肖", segment, "特肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 16. 特肖猴30 =====
     m = re.fullmatch(rf"(?:特肖|特)([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:一)?(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "特肖", segment, "特肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "特肖", segment, "特肖", "fixed",
                          ",".join(animals), len(animals))], [], True
     m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:特肖|特)(?:一)?(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "特肖", segment, "特肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "特肖", segment, "特肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 17. 平鸡一500 =====
     m = re.fullmatch(rf"平([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:一)?(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "平特一肖", segment, "平特一肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "平特一肖", segment, "平特一肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 18. 龙平特500 =====
     m = re.fullmatch(rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:平特一肖|平特肖|平特)(?:一)?(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "平特一肖", segment, "平特一肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "平特一肖", segment, "平特一肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 19. 平特一肖鸡400 =====
     m = re.fullmatch(rf"(?:平特一肖|平特肖|平特)([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:一)?(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "平特一肖", segment, "平特一肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "平特一肖", segment, "平特一肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
+    # ===== 20. 标准写法：平特一肖：龙 500 =====
     m = re.fullmatch(rf"(?:平特一肖|平特肖)([鼠牛虎兔龙蛇马羊猴鸡狗猪]+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        animals = list(m.group(1)); amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "平特一肖", segment, "平特一肖", "fixed",
+        animals = list(m.group(1))
+        return [BetGroup([], amount_value(m.group(2)), "平特一肖", segment, "平特一肖", "fixed",
                          ",".join(animals), len(animals))], [], True
 
-    m = re.fullmatch(rf"([二三四五]|[2-5])连(?:肖)?([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各组|每组|组|各)?{amount_re}{suffix_re}", clean)
+    # ===== 21. 三连鸡鼠蛇二十米 =====
+    m = re.fullmatch(rf"([二两三四五]|[2-5])连([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:各组|每组|组|各)?{amount_re}{suffix_re}", clean)
     if m:
         choose = _cn_or_digit_to_int(m.group(1))
         animals = list(m.group(2))
@@ -1041,15 +1081,17 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             multiplier = comb(len(animals), choose)
             return [BetGroup([], amount, f"{choose}连肖复试", segment, f"{choose}连肖复试", "fixed", ",".join(animals), multiplier)], [], True
 
+    # ===== 22. 9尾平特500 =====
     m = re.fullmatch(rf"([0-9])尾(?:平特一肖|平特尾|平特)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        tail = m.group(1) + "尾"; amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "尾数平特", segment, "尾数平特", "fixed", tail, 1)], [], True
+        tail = m.group(1) + "尾"
+        return [BetGroup([], amount_value(m.group(2)), "尾数平特", segment, "尾数平特", "fixed", tail, 1)], [], True
 
+    # ===== 23. 尾数平特：9尾 500 =====
     m = re.fullmatch(rf"(?:尾数平特|平特尾|平特)([0-9])尾(?:各)?{amount_re}{suffix_re}", clean)
     if m:
-        tail = m.group(1) + "尾"; amount = amount_value(m.group(2))
-        return [BetGroup([], amount, "尾数平特", segment, "尾数平特", "fixed", tail, 1)], [], True
+        tail = m.group(1) + "尾"
+        return [BetGroup([], amount_value(m.group(2)), "尾数平特", segment, "尾数平特", "fixed", tail, 1)], [], True
 
     return [], [], False
 
