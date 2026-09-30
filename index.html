@@ -53,14 +53,15 @@ select{padding:10px 12px;min-height:44px}
 
 /* 输入页专用 */
 #raw-input{
-  min-height:140px;
+  min-height:120px;
   font-size:16px;
   flex-shrink:0;
 }
 #preview-box{
   background:var(--card2);border-radius:10px;padding:14px;
   font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;
-  white-space:pre-wrap;min-height:80px;flex-shrink:0;
+  white-space:pre-wrap;min-height:60px;max-height:180px;overflow:auto;
+  flex-shrink:0;
   line-height:1.5;
 }
 
@@ -77,7 +78,50 @@ button:active{opacity:0.7}
 button.primary{background:var(--accent);font-weight:600}
 button.danger{background:#5a1e1e}
 
-#totals{font-size:14px;color:var(--yellow);padding:6px 2px;line-height:1.6}
+#totals{font-size:14px;color:var(--yellow);padding:6px 2px;line-height:1.6;flex-shrink:0}
+
+/* 记录列表（输入页下方，新记录在上） */
+.records-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:4px 2px;flex-shrink:0;
+}
+.records-header h3{font-size:14px;font-weight:600;color:var(--muted)}
+.records-header .count{
+  font-size:12px;color:var(--accent);font-weight:600;
+  background:rgba(59,140,245,0.12);
+  padding:2px 8px;border-radius:10px;
+}
+#records-list{
+  flex:1;min-height:120px;overflow:auto;
+  background:var(--card);border-radius:10px;
+  border:1px solid var(--border);
+}
+#records-list .rec-row{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 12px;border-bottom:1px solid var(--border);
+  font-size:14px;
+}
+#records-list .rec-row:last-child{border-bottom:none}
+#records-list .rec-row .seq{
+  color:var(--accent);font-weight:600;flex-shrink:0;min-width:32px;
+}
+#records-list .rec-row .region{
+  color:var(--muted);font-size:12px;flex-shrink:0;
+}
+#records-list .rec-row .time{
+  color:var(--muted);font-size:12px;flex:1;
+}
+#records-list .rec-row .amount{
+  color:var(--yellow);font-weight:600;flex-shrink:0;
+}
+#records-list .rec-row .del{
+  color:#c0392b;font-size:12px;flex-shrink:0;
+  padding:4px 8px;border-radius:6px;background:rgba(192,57,43,0.15);
+  cursor:pointer;
+}
+#records-list .empty{
+  text-align:center;color:var(--muted);padding:40px 20px;font-size:14px;
+}
 
 /* 底部导航 */
 nav.tabbar{
@@ -200,6 +244,15 @@ tr.risk-unknown td:last-child { color: var(--muted); }
       <button class="danger" onclick="onClearInput()">清空</button>
     </div>
     <div id="totals"></div>
+
+    <!-- 已添加记录（新记录在上） -->
+    <div class="records-header">
+      <h3>已添加记录</h3>
+      <span class="count" id="records-count">0</span>
+    </div>
+    <div id="records-list">
+      <div class="empty">还没有记录</div>
+    </div>
   </section>
 
   <section class="tab" id="tab-summary">
@@ -207,7 +260,6 @@ tr.risk-unknown td:last-child { color: var(--muted); }
       <button data-subtab="numbers" class="active" onclick="switchSubtab('numbers')">号码</button>
       <button data-subtab="zodiac" onclick="switchSubtab('zodiac')">生肖</button>
       <button data-subtab="plays" onclick="switchSubtab('plays')">玩法</button>
-      <button data-subtab="orders" onclick="switchSubtab('orders')">明细</button>
     </div>
     <div class="subtab-content" id="summary-content"></div>
     <div class="btn-row">
