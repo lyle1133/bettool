@@ -318,7 +318,7 @@ async function onAdd() {
   $("#preview-box").textContent = "（等待输入）";
   previewResult = null;
   updateTotals();
-  renderRecords();  // ← 新增：刷新记录列表
+  renderRecords();
   saveLocal();
   toast(`已添加 #${rec.seq}: ${fmtNum(rec.amount)}`);
 }
@@ -343,7 +343,7 @@ async function onClearAll() {
   state.records = [];
   saveLocal();
   updateTotals();
-  renderRecords();  // ← 新增：刷新记录列表
+  renderRecords();
   refreshSummary();
   toast("已清空");
 }
@@ -601,7 +601,7 @@ function onSaveSettings() {
 function switchTab(name) {
   $$(".tab").forEach(t => t.classList.toggle("active", t.id === "tab-" + name));
   $$("nav.tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-  if (name === "input") renderRecords();     // ← 新增：切回输入页时刷新记录
+  if (name === "input") renderRecords();
   if (name === "summary") refreshSummary();
   if (name === "win") refreshWin();
   if (name === "risk") refreshRisk();
@@ -631,7 +631,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   loadLocal();
   yearSel.value = state.year;
-  renderRecords();  // ← 新增：初始渲染
+  renderRecords();
 
   try {
     await initPyodide();
