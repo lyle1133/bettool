@@ -211,7 +211,6 @@ async function initPyodide() {
   lm.textContent = "正在加载解析内核…";
   const coreSrc = await fetch("core.py").then(r => r.text());
 
-  // 关键：把 core.py 写入 Pyodide 虚拟文件系统，让它成为可 import 的模块
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`
 import sys
@@ -319,6 +318,7 @@ async function onAdd() {
   $("#preview-box").textContent = "（等待输入）";
   previewResult = null;
   updateTotals();
+  renderRecords();  // ← 新增：刷新记录列表
   saveLocal();
   toast(`已添加 #${rec.seq}: ${fmtNum(rec.amount)}`);
 }
@@ -343,8 +343,48 @@ async function onClearAll() {
   state.records = [];
   saveLocal();
   updateTotals();
+  renderRecords();  // ← 新增：刷新记录列表
   refreshSummary();
   toast("已清空");
+}
+
+// ← 新增：删除单条记录
+function deleteRecord(seq) {
+  if (!confirm(`确定删除 #${seq}？`)) return;
+  state.records = state.records.filter(r => r.seq !== seq);
+  // 重新编号，保持 seq 连续
+  state.records.forEach((r, i) => { r.seq = i + 1; });
+  saveLocal();
+  updateTotals();
+  renderRecords();
+  toast(`已删除 #${seq}`);
+}
+
+// ← 新增：渲染记录列表（新的在最上面）
+function renderRecords() {
+  const box = $("#records-list");
+  const cnt = $("#records-count");
+  if (!box) return;
+  if (cnt) cnt.textContent = state.records.length;
+
+  if (!state.records.length) {
+    box.innerHTML = '<div class="empty">还没有记录</div>';
+    return;
+  }
+
+  // 倒序：最新添加的显示在最上面
+  const sorted = [...state.records].sort((a, b) => b.seq - a.seq);
+
+  box.innerHTML = sorted.map(r => {
+    const timeShort = (r.created_at || "").slice(5, 16); // "MM-DD HH:MM"
+    return `<div class="rec-row">
+      <span class="seq">#${r.seq}</span>
+      <span class="region">${r.region || "澳门"}</span>
+      <span class="time">${timeShort}</span>
+      <span class="amount">${fmtNum(r.amount)}</span>
+      <span class="del" onclick="deleteRecord(${r.seq})">删</span>
+    </div>`;
+  }).join("");
 }
 
 // ==================== 汇总页 ====================
@@ -370,17 +410,6 @@ async function refreshSummary() {
 
 function renderSubtab(sum) {
   const box = $("#summary-content");
-  if (currentSubtab === "orders") {
-    const rows = state.records.map(r => `<tr>
-      <td>${r.seq}</td><td>${r.region || "澳门"}</td>
-      <td>${(r.created_at||"").slice(5,16)}</td>
-      <td>${fmtNum(r.amount)}</td><td>${(r.warnings||[]).length}</td>
-    </tr>`).join("");
-    box.innerHTML = `<table class="data-table">
-      <thead><tr><th>序</th><th>地区</th><th>时间</th><th>金额</th><th>提示</th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
-    return;
-  }
   const data = sum[currentSubtab] || [];
   if (!data.length) { box.innerHTML = '<div class="empty">无数据</div>'; return; }
   const head = {
@@ -451,11 +480,9 @@ function renderRisk(rows) {
   }
 
   const head = rows[0];
-  // 分离统计摘要行
   const summaryRow = rows.slice(1).find(r => String(r[0] || "").includes("统计"));
   const bodyRows = rows.slice(1).filter(r => !String(r[0] || "").includes("统计"));
 
-  // 统计摘要
   let summaryHtml = "";
   if (summaryRow) {
     summaryHtml = `<div class="risk-summary">
@@ -465,17 +492,15 @@ function renderRisk(rows) {
     </div>`;
   }
 
-  // 表头
   const th = head.map(h => `<th>${h}</th>`).join("");
 
-  // 数据行
   const tr = bodyRows.map(row => {
     const profit = row[9];
     const level = String(row[11] || "");
     let rowCls = "risk-unknown";
-    if (level.includes("🔴") || level.includes("高")) rowCls = "risk-high";
-    else if (level.includes("🟡") || level.includes("中")) rowCls = "risk-mid";
-    else if (level.includes("🟢") || level.includes("低")) rowCls = "risk-low";
+    if (level.includes("🔴") || level.includes("[高]")) rowCls = "risk-high";
+    else if (level.includes("🟡") || level.includes("[中]")) rowCls = "risk-mid";
+    else if (level.includes("🟢") || level.includes("[低]")) rowCls = "risk-low";
 
     const profitNum = typeof profit === "number" ? profit : null;
     const profitCls = profitNum === null ? "" : (profitNum > 0 ? "profit-pos" : "profit-neg");
@@ -576,6 +601,7 @@ function onSaveSettings() {
 function switchTab(name) {
   $$(".tab").forEach(t => t.classList.toggle("active", t.id === "tab-" + name));
   $$("nav.tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  if (name === "input") renderRecords();     // ← 新增：切回输入页时刷新记录
   if (name === "summary") refreshSummary();
   if (name === "win") refreshWin();
   if (name === "risk") refreshRisk();
@@ -605,6 +631,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   loadLocal();
   yearSel.value = state.year;
+  renderRecords();  // ← 新增：初始渲染
 
   try {
     await initPyodide();
