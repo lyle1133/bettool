@@ -147,6 +147,33 @@ nav.tabbar button.active{color:var(--accent)}
   background:var(--btn);color:var(--text);border:1px solid var(--border);
   border-radius:8px;padding:6px 10px;font-size:13px;min-height:36px;
 }
+
+/* ===== 风险页 ===== */
+.risk-summary {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 10px;
+  background: linear-gradient(135deg, #2a1f22 0%, #1f1a1c 100%);
+  border-radius: 10px; font-size: 13px; font-weight: 600;
+}
+.risk-summary span {
+  padding: 4px 10px; background: var(--card); border-radius: 6px;
+}
+.risk-summary .max { color: #f26666; }
+.risk-summary .min { color: #59d97a; }
+.risk-summary .avg { color: #3b8cf5; }
+
+.table-wrap {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.table-wrap table.data-table { min-width: 820px; }
+
+tr.risk-high    td:last-child { color: #f26666; font-weight: bold; }
+tr.risk-mid     td:last-child { color: #ffd158; font-weight: bold; }
+tr.risk-low     td:last-child { color: #59d97a; font-weight: bold; }
+tr.risk-unknown td:last-child { color: var(--muted); }
+
+.profit-pos { color: #f26666; font-weight: bold; }
+.profit-neg { color: #59d97a; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -198,6 +225,10 @@ nav.tabbar button.active{color:var(--accent)}
     <div class="subtab-content" id="win-content"></div>
   </section>
 
+  <section class="tab" id="tab-risk">
+    <div class="subtab-content" id="risk-content"></div>
+  </section>
+
   <section class="tab" id="tab-settings">
     <div class="subtab-bar">
       <button data-settings-tab="odds" class="active" onclick="switchSettingsTab('odds')">赔率</button>
@@ -215,6 +246,7 @@ nav.tabbar button.active{color:var(--accent)}
   <button data-tab="input" class="active" onclick="switchTab('input')">输入</button>
   <button data-tab="summary" onclick="switchTab('summary')">汇总</button>
   <button data-tab="win" onclick="switchTab('win')">中奖</button>
+  <button data-tab="risk" onclick="switchTab('risk')">风险</button>
   <button data-tab="settings" onclick="switchTab('settings')">设置</button>
 </nav>
 
