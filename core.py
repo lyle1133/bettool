@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 押注解析与统计内核（从 app_no_console.pyw 拆出，移动端复用）
-- v5.8.1 修复：连肖逐组/复试结算、实时风险排序、六肖中正则
+- v5.8.2 修复：多行二中二/三中三 头部识别、内联首组、跳过提示、正则切分
 - 依赖：仅标准库（Kivy 只用于获取平台判断，可选项）
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ except Exception:
     _kivy_platform = sys.platform
 
 APP_NAME = "押注自动统计"
-APP_VERSION = "5.8.1"
+APP_VERSION = "5.8.2"
 
 ZODIAC_ORDER = list("鼠牛虎兔龙蛇马羊猴鸡狗猪")
 COLOR_NUMBERS: Dict[str, List[int]] = {
@@ -121,7 +121,6 @@ def _can_write_dir(path: Path) -> bool:
 
 def get_app_dir() -> Path:
     """跨平台可写目录：Android / iOS / macOS / Windows / Linux 通用。"""
-    # ---- Android ----
     if _kivy_platform == "android":
         try:
             from android.storage import app_storage_path  # type: ignore
@@ -131,7 +130,6 @@ def get_app_dir() -> Path:
         except Exception:
             pass
 
-    # ---- iOS ----
     if _kivy_platform == "ios":
         try:
             base = Path.home() / "Documents"
@@ -140,7 +138,6 @@ def get_app_dir() -> Path:
         except Exception:
             pass
 
-    # ---- 桌面 ----
     try:
         if sys.platform == "darwin":
             fallback = Path.home() / "Library" / "Application Support" / "BetTool"
@@ -154,7 +151,6 @@ def get_app_dir() -> Path:
     except Exception:
         pass
 
-    # ---- 最后兜底 ----
     try:
         candidate = Path.cwd()
         if _can_write_dir(candidate):
@@ -782,7 +778,6 @@ def _color_special_numbers(selection_text: str) -> List[int]:
 
 
 def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[BetGroup], List[str], bool]:
-        # ⚠️ 清理来源前缀：新澳/新奥/新澳门/澳门/香港/港/门 等
     segment = re.sub(r"^(?:\s*(?:新澳|新奥|新澳门|澳門|澳门|香港|港|老门|新门|门)\s*[:：]?\s*)+", "", segment)
     clean = re.sub(r"[\s,，、。.;；:#井@]+", "", segment)
     if not clean:
@@ -927,7 +922,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     def _choose_value(text: str) -> int:
         return _cn_or_digit_to_int(text)
 
-    # ===== 6. 【新增】平特一肖多肖（前置）：平特一肖:狗兔,各300 =====
+    # ===== 6. 平特一肖多肖（前置）：平特一肖:狗兔,各300 =====
     _seg_pf = segment.replace("免", "兔")
     _seg_pf = re.sub(r"^[\s。.;；,，、：:]+", "", _seg_pf)
     m = re.fullmatch(
@@ -955,7 +950,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     if m:
         return make_lianxiao(m.group(2), m.group(1), m.group(3))
 
-    # ===== 8. 【修复】逐组连肖（支持"两连"、无"肖"）=====
+    # ===== 8. 逐组连肖（支持"两连"、无"肖"）=====
     m = re.fullmatch(
         rf"(?:平特)?([二两三四五]|[2-5])\s*连(?:肖)?\s*[:：]?\s*"
         rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]+(?:[\s,，、][鼠牛虎兔龙蛇马羊猴鸡狗猪]+)*)"
@@ -971,7 +966,6 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         if good:
             amount = amount_value(m.group(3))
             play = f"{choose}连肖"
-            # ⚠️ 关键：分号分隔每一组，settle_group 据此判定为"逐组"模式
             return [BetGroup([], amount, play, segment, play, "fixed",
                              ";".join(good), len(good))], [], True
 
@@ -1115,12 +1109,210 @@ def _parse_general_segment(segment: str, year_animal: str) -> Tuple[List[BetGrou
     return groups, warnings, segment[cursor:]
 
 
+# =========================== 多行二中二/三中三 ===========================
+_MULTILINE_PINGMA_HEADS: Tuple[Tuple[str, str, int], ...] = (
+    ("三中三", "三中三", 3), ("3中3", "三中三", 3),
+    ("二中二", "二中二", 2), ("2中2", "二中二", 2),
+)
+_MULTILINE_PINGMA_HEAD_PREFIX = r"^\s*(?:(?:平码|复试|复式)\s*)*"
+
+
+def _parse_multiline_pingma_blocks(
+    raw_text: str,
+    year_animal: str = "马",
+) -> Tuple[List[BetGroup], List[str], str]:
+    """
+    专门处理“二中二/三中三”分行逐组下注。
+
+    例如：
+        三中三
+        45-05-22
+        23-26-17
+        39-21-38各组10
+
+    识别为：
+        三中三
+        45-05-22;23-26-17;39-21-38
+        每组10，共3组，总额30
+
+    同时支持头部与第一组同行：
+        三中三 45-05-22
+        23-26-17
+        39-21-38各组10
+
+    以及组合前缀：
+        平码复式三中三
+        45-05-22各组10
+    """
+    if not (raw_text or "").strip():
+        return [], [], raw_text or ""
+
+    lines = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    consumed: Set[int] = set()
+    groups: List[BetGroup] = []
+    warnings: List[str] = []
+
+    num_pat = r"(?:0?[1-9]|[1-4]\d|49)"
+    head_alt = "|".join(re.escape(h) for h, _p, _c in _MULTILINE_PINGMA_HEADS)
+
+    def _header_info(line: str) -> Optional[Tuple[str, int, str]]:
+        """返回 (play_name, choose, 头部行内联尾部文本)。失败返回 None。"""
+        if not line:
+            return None
+        # 允许头部后面紧跟中文以外内容，或直接结束。
+        pattern = rf"{_MULTILINE_PINGMA_HEAD_PREFIX}(?:{head_alt})(?![\u4e00-\u9fff])"
+        m = re.match(pattern, line)
+        if not m:
+            return None
+        matched_head = re.sub(r"[\s:：]+", "", line[m.start():m.end()])
+        matched_head = re.sub(r"^(?:(?:平码|复试|复式))+", "", matched_head)
+        for head, play, choose in _MULTILINE_PINGMA_HEADS:
+            if matched_head == head:
+                return play, choose, line[m.end():]
+        return None
+
+    def _parse_group_line(
+        line: str,
+        choose: int,
+    ) -> Tuple[Optional[str], Optional[float]]:
+        """返回 (号码组字符串, 金额)，二者均可为 None。"""
+        s = (line or "").strip()
+        if not s:
+            return None, None
+
+        group_pat = (
+            rf"(?P<nums>{num_pat}"
+            rf"(?:\s*[-~,.，、/]\s*{num_pat}){{{choose - 1}}})"
+        )
+        amount_pat = (
+            rf"(?:各组|每组|各|组)\s*"
+            rf"(?P<amount>\d+(?:\.\d+)?|{CN_NUMBER_RE})"
+            rf"(?:\s*(?:元|块|米|斤|钱|片|文|闷|门|点))?"
+        )
+
+        # 形如：39-21-38各组10
+        m = re.fullmatch(rf"\s*{group_pat}\s*{amount_pat}\s*", s)
+        if m:
+            nums_raw = re.split(r"\s*[-~,.，、/]\s*", m.group("nums"))
+            nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
+            amount_raw = m.group("amount")
+            try:
+                amount = (
+                    float(cn_to_number(amount_raw))
+                    if re.fullmatch(CN_NUMBER_RE, amount_raw or "")
+                    else float(amount_raw)
+                )
+            except Exception:
+                return None, None
+            return "-".join(nums), amount
+
+        # 形如：45-05-22（无金额）
+        m = re.fullmatch(rf"\s*{group_pat}\s*", s)
+        if m:
+            nums_raw = re.split(r"\s*[-~,.，、/]\s*", m.group("nums"))
+            nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
+            return "-".join(nums), None
+
+        return None, None
+
+    i = 0
+    while i < len(lines):
+        header = _header_info(lines[i])
+        if not header:
+            i += 1
+            continue
+
+        play_name, choose, inline_tail = header
+        block_groups: List[str] = []
+        amount: Optional[float] = None
+        j = i + 1
+
+        # 头部行内联的第一组
+        if inline_tail and inline_tail.strip():
+            group_text, line_amount = _parse_group_line(inline_tail, choose)
+            if group_text:
+                block_groups.append(group_text)
+                if line_amount is not None:
+                    amount = line_amount
+
+        # 继续向下读取后续号码组，直到遇到金额或非组行
+        while amount is None and j < len(lines):
+            group_text, line_amount = _parse_group_line(lines[j], choose)
+            if group_text is None:
+                break
+            block_groups.append(group_text)
+            if line_amount is not None:
+                amount = line_amount
+                j += 1
+                break
+            j += 1
+
+        if block_groups and amount is not None:
+            source = "\n".join(lines[i:j])
+            groups.append(
+                BetGroup(
+                    [],
+                    amount,
+                    play_name,
+                    source,
+                    play_name,
+                    "fixed",
+                    ";".join(block_groups),
+                    len(block_groups),
+                )
+            )
+            consumed.update(range(i, j))
+            i = j
+            continue
+
+        # 区分两类跳过原因，写入 warnings 供上层展示
+        if block_groups and amount is None:
+            warnings.append(
+                f"{play_name} 区块未找到金额（如'各组10'），已跳过："
+                + " / ".join(lines[i:j])
+            )
+        elif not block_groups:
+            warnings.append(f"{play_name} 后面没有识别到号码组，已跳过：{lines[i].strip()}")
+
+        i += 1
+
+    remaining_lines = [
+        line for index, line in enumerate(lines)
+        if index not in consumed
+    ]
+
+    return groups, warnings, "\n".join(remaining_lines)
+
+
 def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
-    normalized = preprocess_text(raw_text)
-    parsed = ParsedBet(raw_text=raw_text or "", normalized_text=normalized)
+    # 先单独处理“二中二/三中三”的分行逐组格式。
+    # 必须在 preprocess_text() 之前处理，因为 preprocess_text()
+    # 会把换行转换成“|”，原来的玩法头和后续号码会被拆散。
+    multiline_groups, multiline_warnings, remaining_raw = (
+        _parse_multiline_pingma_blocks(raw_text, year_animal)
+    )
+
+    # 只在剥离了多行三中三/二中二区块时，才需要预处理两份文本。
+    if multiline_groups:
+        normalized = preprocess_text(remaining_raw)
+        normalized_full = preprocess_text(raw_text)
+    else:
+        normalized = preprocess_text(raw_text)
+        normalized_full = normalized
+
+    parsed = ParsedBet(
+        raw_text=raw_text or "",
+        normalized_text=normalized_full,
+    )
+
     if not (raw_text or "").strip():
         parsed.warnings.append("输入内容为空")
         return parsed
+
+    if multiline_groups:
+        parsed.groups.extend(multiline_groups)
+    if multiline_warnings:
+        parsed.warnings.extend(multiline_warnings)
 
     pending: List[str] = []
 
@@ -1419,7 +1611,7 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
             return True, f"{play}命中：" + ",".join(names), win_stake, _odds_label(odds), payout, payout - group.total
         return False, f"未中{play}（只按平码判断，特码不算）", 0.0, "", 0.0, -group.total
 
-    # ================= 连肖（修复：区分"逐组"与"复试"） =================
+    # ================= 连肖（区分"逐组"与"复试"） =================
     if "连肖" in play:
         from itertools import combinations
         m_size = re.search(r"([2-5])\s*连肖", play)
@@ -1431,13 +1623,11 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
         combo_list: List[Tuple[str, ...]] = []
 
         if ";" in raw:
-            # 逐组：分号分隔的每一段是固定组合，直接判定，不做组合展开
             for g in raw.split(";"):
                 animals = tuple(ch for ch in g if ch in ZODIAC_ORDER)
                 if len(animals) == expected_size:
                     combo_list.append(animals)
         else:
-            # 复试 或 单组
             parts = re.split(r"[,，、]", raw)
             base_animals = [ch for part in parts for ch in part if ch in ZODIAC_ORDER]
             if len(base_animals) < expected_size:
@@ -1632,7 +1822,6 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
                    total_rebate, final_profit, hit_text, risk_level]
             all_data.append((sort_profit, row))
 
-    # ⚠️ 修复：升序排列，亏损最大的排最前；"待填赔率"(inf) 自动落到最后
     all_data.sort(key=lambda item: -item[0])
     profits = [item[0] for item in all_data if isinstance(item[0], (int, float)) and item[0] != float("inf")]
     if profits:
