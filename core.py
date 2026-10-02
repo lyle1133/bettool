@@ -949,6 +949,12 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         combo_text)
     if m:
         return make_lianxiao(m.group(2), m.group(1), m.group(3))
+        # ===== 7.5 【新增】兼容：龙虎猴鸡马羊兔复试五连各10 =====
+    m = re.fullmatch(
+        rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})(?:复试|复式)([二两三四五]|[2-5])连(?:肖)?(?:各组|每组|组|各)?{amount_re}{suffix_re}",
+        combo_text)
+    if m:
+        return make_lianxiao(m.group(1), m.group(2), m.group(3))
 
     # ===== 8. 逐组连肖（支持"两连"、无"肖"）=====
     m = re.fullmatch(
