@@ -59,6 +59,10 @@ select{padding:10px 12px;min-height:44px}
   white-space:pre-wrap;min-height:60px;max-height:180px;overflow:auto;
   line-height:1.5;
 }
+#ai-status{
+  background:var(--card2);border-radius:10px;padding:10px 12px;
+  color:var(--muted);font-size:13px;line-height:1.4;
+}
 
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 button{
@@ -74,7 +78,6 @@ button.danger{background:#5a1e1e}
 
 #totals{font-size:14px;color:var(--yellow);padding:6px 2px;line-height:1.6}
 
-/* ===== 用户选择栏（输入页 + 中奖页共用） ===== */
 .user-bar{
   display:flex;align-items:center;gap:6px;flex-wrap:wrap;
   padding:4px 0;
@@ -247,7 +250,6 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 
 <main>
   <section class="tab active" id="tab-input">
-    <!-- 当前用户选择 -->
     <div class="user-bar">
       <span>当前用户：</span>
       <button data-user="A" onclick="switchUser('A')">A</button>
@@ -258,16 +260,17 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 
     <textarea id="raw-input" placeholder="粘贴下注内容…
 例：龙鸡二连肖200 / 猴30米 / 鸡狗鼠各肖10"></textarea>
+    <div id="ai-status">🤖 AI智能解析：本地失败后自动兜底，也可点“AI解析”手动触发</div>
     <div id="preview-box">（等待输入）</div>
     <div class="btn-row">
       <button onclick="onPaste()">粘贴</button>
       <button class="primary" onclick="onAdd()">添加</button>
+      <button onclick="doPreview(true)">🤖 AI解析</button>
       <button onclick="onCopy()">复制</button>
       <button class="danger" onclick="onClearInput()">清空</button>
     </div>
     <div id="totals"></div>
 
-    <!-- 已添加记录 -->
     <div class="records-header">
       <h3>已添加记录</h3>
       <span class="count" id="records-count">0</span>
@@ -292,7 +295,6 @@ tr.risk-unknown td:last-child { color: var(--muted); }
   <section class="tab" id="tab-win">
     <input type="text" id="macau-draw" placeholder="澳门开奖号码（7 个）">
     <input type="text" id="hk-draw" placeholder="香港开奖号码（7 个）">
-    <!-- 用户筛选 -->
     <div class="user-bar">
       <span>筛选用户：</span>
       <button data-winfilter="全部" onclick="switchWinFilter('全部')">全部</button>
@@ -334,6 +336,6 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 </nav>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
