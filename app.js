@@ -18,7 +18,7 @@ const DEFAULT_ODDS = {
   lianxiao_4:30, lianxiao_4_ma:25,
   lianxiao_5:100, lianxiao_5_ma:85,
   pingma_2:null, pingma_3:null,
-  wubuzhong:null, // 加上这个
+  wubuzhong:null,
 };
 
 const ODDS_ITEMS = [
@@ -36,7 +36,7 @@ const DEFAULT_REBATE = {
   global:0, tema:null, texiao:null, pingte_xiao:null,
   pingte_tail:null, color:null,
   lianxiao_2:null, lianxiao_3:null, lianxiao_4:null, lianxiao_5:null,
-  pingma_2:null, pingma_3:null,wubuzhong:null,
+  pingma_2:null, pingma_3:null, wubuzhong:null,
 };
 
 const REBATE_ITEMS = [
@@ -69,7 +69,7 @@ function maskKey(key) {
 }
 
 const AI_MIN_CONFIDENCE = 0.75;
-const AI_AUTO_FALLBACK = true; // 本地解析失败/严重警告时，是否允许自动兜底
+const AI_AUTO_FALLBACK = true;
 let aiBusy = false;
 let aiTimer = null;
 
@@ -90,7 +90,7 @@ const SYSTEM_PROMPT = `
 1. 特码总单
 2. 特肖
 3. 各肖
-4. 一平特
+4. 平特一肖（简称“平特”、“平特肖”）
 5. 平特尾
 6. 波色
 7. 二连肖
@@ -99,36 +99,31 @@ const SYSTEM_PROMPT = `
 10. 五连肖
 11. 二中二
 12. 三中三
-13.平特一肖（简称“平特”、“平特肖”）
-14. 五不中 / 六不中 / 七不中
-
-特别注意以下转换规则：
-“五不中:04.06.05.11.12, 200文” → “04 06 05 11 12 五不中 200”
-（必须把号码放在前面，玩法放在中间，金额放在后面。不要保留冒号和“文”字。）
+13. 五不中 / 六不中 / 七不中
 
 号码范围只能是 01-49。
 
 常见表达转换：
 “01各20” → “01各20”
 “01、13、25各10米” → “01 13 25各10”
-“04 16 28 ... 每个3块” → “特码总单：04,16,28...各3”
 “01.13.25各50” → “01 13 25各50”
 “猴鸡狗三连肖100” → “三连肖：猴鸡狗各100”
 “三中三 01 13 25 50” → “三中三：01-13-25 50”
 “01 13 25 三中三50” → “三中三：01-13-25 50”
 “二中二 01-13 20” → “二中二：01-13 20”
-特别注意以下转换规则：
+“五不中:04.06.05.11.12, 200文” → “04 06 05 11 12 五不中 200”
+“平特:猪狗各肖1000米” → “平特一肖：猪狗各1000”
+“平特猪狗各肖1000” → “平特一肖：猪狗各1000”
+“猪狗平特各肖1000” → “平特一肖：猪狗各1000”
+“15 25 47 07 31 43 29 30 每个3块” → “特码总单：15 25 47 07 31 43 29 30 各3”
 
+特别注意：
 1. “平特”、“平特肖”统一视为“平特一肖”。
-2. 在标准化文本中，不要保留“各肖”这个词，统一用“各”。
-3. 对于“平特:猪狗各肖1000米”，标准化为：“平特一肖：猪狗各1000”。
-4. 对于“平特猪狗各肖1000”，标准化为：“平特一肖：猪狗各1000”。
-5. 对于“猪狗平特各肖1000”，标准化为：“平特一肖：猪狗各1000”。
-特别注意多行输入的处理规则：
-1. 如果用户输入包含多行，必须逐行解析，不能遗漏任何一行。
-2. 对于“15 25 47 07 31 43 29 30 每个3块”这种没有玩法的纯号码格式，必须标准化为“特码总单：15 25 47 07 31 43 29 30 各3”。
-3. 对于纯号码下注，统一使用玩法“特码总单”。
-4. 绝对不允许把包含号码和金额的行放进 unresolved 中，必须全部输出在 items 里。
+2. 标准化文本中不要保留“各肖”，统一用“各”。
+3. 对于纯号码下注（没有玩法），统一使用玩法“特码总单”。
+4. 如果用户输入包含多行，必须逐行解析，不能遗漏任何一行。
+5. 绝对不允许把包含号码和金额的行放进 unresolved 中。
+
 如果用户输入包含多个下注，请逐条输出。
 如果一条下注无法确定：不要猜，把它放到 unresolved 中。
 
@@ -385,18 +380,16 @@ async function pyRiskRows() {
     JSON.stringify(state.rebate)));
 }
 
-// ==================== AI 调用 (直连 Groq) ====================
+// ==================== AI 调用（直连 Groq） ====================
 async function callBetToolAI(text) {
   if (!text || !text.trim()) return null;
 
-  const apiKey = getApiKey();  // ← 改这里
-
+  const apiKey = getApiKey();
   if (!apiKey || !apiKey.startsWith("gsk_")) {
     throw new Error("请先在「设置」页填入你的 Groq API Key");
   }
 
   if (aiBusy) return null;
-
   aiBusy = true;
   setStatus("🤖 AI正在解析…");
 
@@ -405,16 +398,10 @@ async function callBetToolAI(text) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`  // ← 和这里
+        "Authorization": `Bearer ${apiKey}`
       },
-      // ... 其余不变
-    });
-    // ...
-  }
-  // ...
-}
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b", // 如果不可用，可换成 "openai/gpt-oss-120b"
+        model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: "请解析下面的下注文字：\n\n" + text }
@@ -454,7 +441,6 @@ async function callBetToolAI(text) {
       item => Number(item.confidence || 0) < AI_MIN_CONFIDENCE
     );
 
-    // 把 AI 结果交给 Pyodide 里的 core.py 处理
     const parsed = await pyParseAIResult(ai);
     parsed.ai = true;
     parsed.ai_raw = ai;
@@ -463,7 +449,6 @@ async function callBetToolAI(text) {
     parsed.raw_text = text;
 
     return parsed;
-
   } finally {
     aiBusy = false;
     setStatus("🟢 本地解析 + AI");
@@ -889,10 +874,41 @@ function renderSettings() {
 
   const html = [apiKeyHtml, `<div style="padding:8px;color:var(--muted);font-size:12px">${hint}</div>`];
   for (const [key, label] of items) {
-    // ... 原有循环不变
+    const v = cfg[key];
+    const text = v === null || v === undefined ? "" : fmtNum(v);
+    html.push(`<div class="setting-row">
+      <label>${label}</label>
+      <input type="number" step="0.01" data-key="${key}" value="${text}" inputmode="decimal">
+      <span class="unit">${unit}</span>
+    </div>`);
   }
   $("#settings-content").innerHTML = html.join("");
 }
+
+function onResetSettings() {
+  if (currentSettingsTab === "odds") state.odds = { ...DEFAULT_ODDS };
+  else state.rebate = { ...DEFAULT_REBATE };
+  renderSettings();
+  toast("已恢复默认（记得点保存）");
+}
+
+function onSaveSettings() {
+  const inputs = $$("#settings-content input[data-key]");
+  const target = currentSettingsTab === "odds"
+    ? { ...state.odds } : { ...state.rebate };
+  for (const inp of inputs) {
+    const raw = inp.value.trim();
+    if (raw === "") { target[inp.dataset.key] = null; continue; }
+    const n = Number(raw);
+    if (!isFinite(n) || n < 0) { toast(`「${raw}」不是有效数字`); return; }
+    target[inp.dataset.key] = n;
+  }
+  if (currentSettingsTab === "odds") state.odds = target;
+  else state.rebate = target;
+  saveLocal();
+  toast("已保存");
+}
+
 function onSaveApiKey() {
   const inp = $("#api-key-input");
   if (!inp) return;
