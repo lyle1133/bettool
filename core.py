@@ -2214,15 +2214,17 @@ def ai_result_to_preview(ai_result, year_animal="马"):
             "groups": []
         }
 
-    normalized_text = str(ai_result.get("normalized_text") or "").strip()
+        # 始终从 items 生成 normalized_text（比 AI 返回的更可靠）
+    generated_lines = []
+    for item in checked["items"]:
+        normalized = str(item.get("normalized") or "").strip()
+        if normalized:
+            generated_lines.append(normalized)
+    normalized_text = "\n".join(generated_lines)
 
+    # 如果 items 里没有内容，才回退用 AI 的 normalized_text
     if not normalized_text:
-        generated_lines = []
-        for item in checked["items"]:
-            normalized = str(item.get("normalized") or "").strip()
-            if normalized:
-                generated_lines.append(normalized)
-        normalized_text = "\n".join(generated_lines)
+        normalized_text = str(ai_result.get("normalized_text") or "").strip()
 
     parsed = parse_ai_normalized_text(normalized_text, year_animal)
 
