@@ -265,7 +265,7 @@ tr.risk-unknown td:last-child { color: var(--muted); }
     <div class="btn-row">
       <button onclick="onPaste()">粘贴</button>
       <button class="primary" onclick="onAdd()">添加</button>
-      <button onclick="doPreview(true)">🤖 AI解析</button>
+      <button onclick="doPreview(true, true)">🤖 AI解析</button>
       <button onclick="onCopy()">复制</button>
       <button class="danger" onclick="onClearInput()">清空</button>
     </div>
@@ -336,6 +336,6 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 </nav>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
