@@ -46,18 +46,78 @@ const REBATE_ITEMS = [
   ["pingma_2","二中二"],["pingma_3","三中三"],
 ];
 
-// ==================== Gemini AI ====================
-// ⚠️⚠️⚠️ 这里换成你刚刚建好的 Cloudflare Worker 地址 ⚠️⚠️⚠️
-const AI_WORKER_URL = "https://jolly-waterfall-8e5b.lyleyle668.workers.dev";
+// ==================== Groq AI 直连 ====================
+// ⚠️⚠️⚠️ 请把下面换成你自己完整的 Groq 密钥（以 gsk_ 开头）⚠️⚠️⚠️
+const GROQ_API_KEY = "gsk_rnwM2DBIw61fxCQPJ6m9WGdyb3FYE2P22RAsgnwSNE8dYUux9Mb";
 
-// 本地解析失败/严重警告时，是否允许自动兜底
-const AI_AUTO_FALLBACK = true;
-
-// AI 最低置信度
 const AI_MIN_CONFIDENCE = 0.75;
-
+const AI_AUTO_FALLBACK = true; // 本地解析失败/严重警告时，是否允许自动兜底
 let aiBusy = false;
 let aiTimer = null;
+
+// ==================== AI System Prompt ====================
+const SYSTEM_PROMPT = `
+你是 BetTool 下注文字解析助手。
+
+你的唯一任务：
+把用户输入的中文下注文字，准确转换成 BetTool 可以继续解析的“标准下注文本”。
+
+不要计算中奖金额。
+不要计算赔率。
+不要修改下注金额。
+不要自行增加号码。
+不要猜测用户没有明确说出的号码。
+
+支持的常见玩法包括：
+1. 特码总单
+2. 特肖
+3. 各肖
+4. 一平特
+5. 平特尾
+6. 波色
+7. 二连肖
+8. 三连肖
+9. 四连肖
+10. 五连肖
+11. 二中二
+12. 三中三
+
+号码范围只能是 01-49。
+
+常见表达转换：
+“01各20” → “01各20”
+“01、13、25各10米” → “01 13 25各10”
+“01.13.25各50” → “01 13 25各50”
+“猴鸡狗三连肖100” → “三连肖：猴鸡狗各100”
+“三中三 01 13 25 50” → “三中三：01-13-25 50”
+“01 13 25 三中三50” → “三中三：01-13-25 50”
+“二中二 01-13 20” → “二中二：01-13 20”
+
+如果用户输入包含多个下注，请逐条输出。
+如果一条下注无法确定：不要猜，把它放到 unresolved 中。
+
+必须返回严格 JSON：
+{
+  "success": true,
+  "normalized_text": "标准化后的下注文本",
+  "items": [
+    {
+      "raw": "原始片段",
+      "normalized": "标准化结果",
+      "play_type": "玩法名称",
+      "numbers": [1, 13, 25],
+      "zodiacs": [],
+      "amount": 50,
+      "confidence": 0.98
+    }
+  ],
+  "unresolved": [],
+  "warnings": []
+}
+
+confidence 范围 0 到 1。
+不要输出 Markdown。不要输出解释。只输出 JSON。
+`;
 
 // ==================== 状态 ====================
 let pyodide = null;
@@ -289,12 +349,13 @@ async function pyRiskRows() {
     JSON.stringify(state.rebate)));
 }
 
-// ==================== AI 调用 ====================
+// ==================== AI 调用 (直连 Groq) ====================
 async function callBetToolAI(text) {
   if (!text || !text.trim()) return null;
 
-  if (!AI_WORKER_URL || AI_WORKER_URL.includes("你的")) {
-    throw new Error("还没有设置 AI Worker 地址");
+  // 检查密钥是否配置
+  if (!GROQ_API_KEY || !GROQ_API_KEY.startsWith("gsk_")) {
+    throw new Error("请先在 app.js 中配置有效的 GROQ_API_KEY");
   }
 
   if (aiBusy) return null;
@@ -303,36 +364,63 @@ async function callBetToolAI(text) {
   setStatus("🤖 AI正在解析…");
 
   try {
-    const response = await fetch(AI_WORKER_URL, {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text })
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile", // 如果不可用，可换成 "openai/gpt-oss-120b"
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: "请解析下面的下注文字：\n\n" + text }
+        ],
+        temperature: 0.1,
+        response_format: { type: "json_object" }
+      })
     });
 
-    const data = await response.json().catch(() => ({}));
+    const responseText = await response.text();
 
     if (!response.ok) {
-      throw new Error(data.error || `AI Worker ${response.status}`);
-    }
-    if (!data.success) {
-      throw new Error(data.error || "AI解析失败");
+      throw new Error(`Groq API ${response.status}: ${responseText.slice(0, 1000)}`);
     }
 
-    const ai = data.result;
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      throw new Error("Groq 返回的数据不是有效 JSON");
+    }
+
+    const textOutput = data?.choices?.[0]?.message?.content?.trim();
+    if (!textOutput) {
+      throw new Error("Groq 没有返回有效解析结果");
+    }
+
+    let ai;
+    try {
+      ai = JSON.parse(textOutput);
+    } catch (e) {
+      throw new Error("Groq 返回内容无法解析为 JSON：" + textOutput.slice(0, 1000));
+    }
+
     const items = Array.isArray(ai.items) ? ai.items : [];
     const lowConfidence = items.some(
       item => Number(item.confidence || 0) < AI_MIN_CONFIDENCE
     );
 
+    // 把 AI 结果交给 Pyodide 里的 core.py 处理
     const parsed = await pyParseAIResult(ai);
     parsed.ai = true;
     parsed.ai_raw = ai;
     parsed.ai_low_confidence = lowConfidence;
     parsed.ai_normalized_text = ai.normalized_text || "";
-
     parsed.raw_text = text;
 
     return parsed;
+
   } finally {
     aiBusy = false;
     setStatus("🟢 本地解析 + AI");
@@ -400,7 +488,7 @@ async function doPreview(allowAI = false) {
       return;
     }
 
-    $("#preview-box").textContent = "🤖 本地规则无法完全确定，正在调用 Gemini AI…";
+    $("#preview-box").textContent = "🤖 本地规则无法完全确定，正在调用 Groq AI…";
 
     try {
       const aiResult = await callBetToolAI(text);
