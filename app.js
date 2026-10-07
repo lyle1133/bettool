@@ -36,7 +36,7 @@ const DEFAULT_REBATE = {
   global:0, tema:null, texiao:null, pingte_xiao:null,
   pingte_tail:null, color:null,
   lianxiao_2:null, lianxiao_3:null, lianxiao_4:null, lianxiao_5:null,
-  pingma_2:null, pingma_3:null,
+  pingma_2:null, pingma_3:null,wubuzhong:null,
 };
 
 const REBATE_ITEMS = [
@@ -44,7 +44,7 @@ const REBATE_ITEMS = [
   ["pingte_xiao","平特一肖"],["pingte_tail","尾数平特"],["color","波色/色单双"],
   ["lianxiao_2","二连肖"],["lianxiao_3","三连肖"],
   ["lianxiao_4","四连肖"],["lianxiao_5","五连肖"],
-  ["pingma_2","二中二"],["pingma_3","三中三"],
+  ["pingma_2","二中二"],["pingma_3","三中三"],["wubuzhong","五不中"],
 ];
 
 // ==================== Groq AI 直连 ====================
