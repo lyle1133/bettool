@@ -371,7 +371,7 @@ async function callBetToolAI(text) {
         "Authorization": `Bearer ${GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", // 如果不可用，可换成 "openai/gpt-oss-120b"
+        model: "openai/gpt-oss-120b", // 如果不可用，可换成 "openai/gpt-oss-120b"
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: "请解析下面的下注文字：\n\n" + text }
