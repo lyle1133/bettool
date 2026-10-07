@@ -2078,3 +2078,166 @@ def export_error_txt(path: str, records: Sequence[OrderRecord]) -> None:
     if not has_errors:
         lines.append("没有发现错误。")
     Path(path).write_text("\n".join(lines), encoding="utf-8-sig")
+
+# ============================================================
+# BetTool AI 解析支持
+# ============================================================
+
+def normalize_ai_numbers(numbers):
+    """
+    清洗 AI 返回的号码。
+    """
+    result = []
+    if not isinstance(numbers, list):
+        return result
+    for value in numbers:
+        try:
+            n = int(value)
+        except Exception:
+            continue
+        if 1 <= n <= 49 and n not in result:
+            result.append(n)
+    return result
+
+
+def validate_ai_result(ai_result):
+    """
+    校验 Gemini 返回的数据。
+    AI 只负责理解文字，最终是否有效仍由 core.py 判断。
+    """
+    if not isinstance(ai_result, dict):
+        return {
+            "success": False,
+            "error": "AI结果不是对象",
+            "items": [],
+            "warnings": []
+        }
+
+    items = ai_result.get("items")
+    if not isinstance(items, list):
+        return {
+            "success": False,
+            "error": "AI没有返回items",
+            "items": [],
+            "warnings": []
+        }
+
+    valid_items = []
+    warnings = list(ai_result.get("warnings") or [])
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        play_type = str(item.get("play_type") or "特码总单").strip()
+
+        amount_raw = item.get("amount")
+        try:
+            amount = float(amount_raw)
+        except Exception:
+            warnings.append(f"AI金额无法识别：{amount_raw}")
+            continue
+
+        if amount <= 0:
+            warnings.append(f"AI金额必须大于0：{amount}")
+            continue
+
+        numbers = normalize_ai_numbers(item.get("numbers"))
+
+        confidence = item.get("confidence", 0)
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        valid_items.append({
+            "raw": str(item.get("raw") or ""),
+            "normalized": str(item.get("normalized") or ""),
+            "play_type": play_type,
+            "numbers": numbers,
+            "zodiacs": list(item.get("zodiacs") or []),
+            "amount": amount,
+            "confidence": confidence,
+        })
+
+    return {
+        "success": bool(valid_items),
+        "items": valid_items,
+        "warnings": warnings,
+        "unresolved": list(ai_result.get("unresolved") or [])
+    }
+
+
+def parse_ai_normalized_text(normalized_text, year_animal="马"):
+    """
+    AI 给出标准化文字以后，再重新交给原来的 parse_bet()。
+    AI：负责理解；core.py：负责最终解析和计算。
+    """
+    if not normalized_text:
+        return ParsedBet(
+            raw_text="",
+            warnings=["AI没有生成标准化下注文本"]
+        )
+    return parse_bet(normalized_text, year_animal)
+
+
+def ai_result_to_preview(ai_result, year_animal="马"):
+    """
+    把 Gemini 返回结果转换成 BetTool 原来的 preview 数据结构。
+    前端可以直接继续使用。
+    """
+    checked = validate_ai_result(ai_result)
+
+    if not checked.get("success"):
+        return {
+            "success": False,
+            "content": "",
+            "total": 0.0,
+            "warnings": checked.get("warnings", []),
+            "groups": []
+        }
+
+    normalized_text = str(ai_result.get("normalized_text") or "").strip()
+
+    if not normalized_text:
+        generated_lines = []
+        for item in checked["items"]:
+            normalized = str(item.get("normalized") or "").strip()
+            if normalized:
+                generated_lines.append(normalized)
+        normalized_text = "\n".join(generated_lines)
+
+    parsed = parse_ai_normalized_text(normalized_text, year_animal)
+
+    all_warnings = []
+    all_warnings.extend(checked.get("warnings", []))
+    all_warnings.extend(parsed.warnings)
+
+    unique_warnings = []
+    for warning in all_warnings:
+        if warning not in unique_warnings:
+            unique_warnings.append(warning)
+
+    return {
+        "success": bool(parsed.groups),
+        "content": parsed.content,
+        "total": float(parsed.total),
+        "warnings": unique_warnings,
+        "raw_text": parsed.raw_text,
+        "normalized_text": normalized_text,
+        "groups": [
+            {
+                "play_type": g.play_type,
+                "label": g.label,
+                "amount": float(g.amount),
+                "total": float(g.total),
+                "billing_mode": g.billing_mode,
+                "selection_text": g.selection_text,
+                "multiplier": int(g.multiplier),
+                "numbers": list(g.numbers),
+                "source": g.source,
+            }
+            for g in parsed.groups
+        ]
+    }
