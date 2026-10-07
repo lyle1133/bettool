@@ -488,7 +488,7 @@ function isSevereWarning(w) {
   return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
 }
 
-async function doPreview(allowAI = false) {
+async function doPreview(allowAI = false, forceAI = false) {
   if (!coreReady) return;
 
   const text = $("#raw-input").value.trim();
@@ -508,7 +508,7 @@ async function doPreview(allowAI = false) {
     const localEmpty = groups.length === 0;
     const severe = warnings.some(isSevereWarning);
 
-    const needAI = allowAI && AI_AUTO_FALLBACK && (localEmpty || severe);
+    const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || localEmpty || severe);
 
     if (!needAI) {
       $("#preview-box").textContent = localResult.content || "（无有效内容）";
