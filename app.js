@@ -48,7 +48,7 @@ const REBATE_ITEMS = [
 
 // ==================== Groq AI 直连 ====================
 // ⚠️⚠️⚠️ 请把下面换成你自己完整的 Groq 密钥（以 gsk_ 开头）⚠️⚠️⚠️
-const GROQ_API_KEY = "gsk_rnwM2DBIw61fxCQPJ6m9WGdyb3FYE2P22RAsgnwSNE8dYUux9Mb";
+const GROQ_API_KEY = "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";
 
 const AI_MIN_CONFIDENCE = 0.75;
 const AI_AUTO_FALLBACK = true; // 本地解析失败/严重警告时，是否允许自动兜底
