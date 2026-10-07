@@ -46,6 +46,19 @@ const REBATE_ITEMS = [
   ["pingma_2","二中二"],["pingma_3","三中三"],
 ];
 
+// ==================== Gemini AI ====================
+// ⚠️⚠️⚠️ 这里换成你刚刚建好的 Cloudflare Worker 地址 ⚠️⚠️⚠️
+const AI_WORKER_URL = "https://jolly-waterfall-8e5b.lyleyle668.workers.dev";
+
+// 本地解析失败/严重警告时，是否允许自动兜底
+const AI_AUTO_FALLBACK = true;
+
+// AI 最低置信度
+const AI_MIN_CONFIDENCE = 0.75;
+
+let aiBusy = false;
+let aiTimer = null;
+
 // ==================== 状态 ====================
 let pyodide = null;
 let coreReady = false;
@@ -59,8 +72,8 @@ const state = {
   records: [],
   odds: { ...DEFAULT_ODDS },
   rebate: { ...DEFAULT_REBATE },
-  currentUser: "A",       // 输入时选定的用户
-  winFilterUser: "全部",  // 中奖页筛选用户
+  currentUser: "A",
+  winFilterUser: "全部",
 };
 
 // ==================== 工具 ====================
@@ -129,6 +142,7 @@ from core import (
     parse_bet, parse_draw_result, settle_orders,
     summarize_orders, export_xlsx, build_risk_rows,
     OrderRecord, BetGroup,
+    ai_result_to_preview,
 )
 
 def _rebuild(s):
@@ -173,6 +187,11 @@ def js_parse_bet(text, year):
             "source": g.source,
         } for g in r.groups],
     }, ensure_ascii=False)
+
+def js_parse_ai_result(ai_json, year):
+    data = json.loads(ai_json)
+    result = ai_result_to_preview(data, year)
+    return json.dumps(result, ensure_ascii=False)
 
 def js_summarize(records_json, year):
     recs = _rebuild(records_json)
@@ -240,6 +259,13 @@ const yearAnimal = () => YEAR_MAP[state.year] || "马";
 async function pyParseBet(text) {
   return JSON.parse(pyCall("js_parse_bet", text, yearAnimal()));
 }
+
+async function pyParseAIResult(aiResult) {
+  return JSON.parse(
+    pyCall("js_parse_ai_result", JSON.stringify(aiResult), yearAnimal())
+  );
+}
+
 async function pySummarize() {
   return JSON.parse(pyCall("js_summarize", JSON.stringify(state.records), yearAnimal()));
 }
@@ -263,6 +289,56 @@ async function pyRiskRows() {
     JSON.stringify(state.rebate)));
 }
 
+// ==================== AI 调用 ====================
+async function callBetToolAI(text) {
+  if (!text || !text.trim()) return null;
+
+  if (!AI_WORKER_URL || AI_WORKER_URL.includes("你的")) {
+    throw new Error("还没有设置 AI Worker 地址");
+  }
+
+  if (aiBusy) return null;
+
+  aiBusy = true;
+  setStatus("🤖 AI正在解析…");
+
+  try {
+    const response = await fetch(AI_WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text })
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || `AI Worker ${response.status}`);
+    }
+    if (!data.success) {
+      throw new Error(data.error || "AI解析失败");
+    }
+
+    const ai = data.result;
+    const items = Array.isArray(ai.items) ? ai.items : [];
+    const lowConfidence = items.some(
+      item => Number(item.confidence || 0) < AI_MIN_CONFIDENCE
+    );
+
+    const parsed = await pyParseAIResult(ai);
+    parsed.ai = true;
+    parsed.ai_raw = ai;
+    parsed.ai_low_confidence = lowConfidence;
+    parsed.ai_normalized_text = ai.normalized_text || "";
+
+    parsed.raw_text = text;
+
+    return parsed;
+  } finally {
+    aiBusy = false;
+    setStatus("🟢 本地解析 + AI");
+  }
+}
+
 // ==================== 用户 & 筛选 ====================
 function switchUser(u) {
   state.currentUser = u;
@@ -283,23 +359,84 @@ function switchWinFilter(f) {
 // ==================== 输入页 ====================
 function schedulePreview() {
   if (previewTimer) clearTimeout(previewTimer);
-  previewTimer = setTimeout(doPreview, 350);
+  if (aiTimer) clearTimeout(aiTimer);
+
+  previewTimer = setTimeout(() => doPreview(false), 350);
+
+  if (AI_AUTO_FALLBACK) {
+    aiTimer = setTimeout(() => doPreview(true), 1500);
+  }
 }
 
-async function doPreview() {
+function isSevereWarning(w) {
+  return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
+}
+
+async function doPreview(allowAI = false) {
   if (!coreReady) return;
+
   const text = $("#raw-input").value.trim();
   if (!text) {
     previewResult = null;
     $("#preview-box").textContent = "（等待输入）";
-    updateTotals(); return;
+    updateTotals();
+    return;
   }
+
   try {
-    previewResult = await pyParseBet(text);
-    $("#preview-box").textContent = previewResult.content || "（无有效内容）";
-  } catch(e) {
-    $("#preview-box").textContent = "解析错误：" + e.message;
+    const localResult = await pyParseBet(text);
+    previewResult = localResult;
+
+    const groups = Array.isArray(localResult.groups) ? localResult.groups : [];
+    const warnings = Array.isArray(localResult.warnings) ? localResult.warnings : [];
+    const localEmpty = groups.length === 0;
+    const severe = warnings.some(isSevereWarning);
+
+    const needAI = allowAI && AI_AUTO_FALLBACK && (localEmpty || severe);
+
+    if (!needAI) {
+      $("#preview-box").textContent = localResult.content || "（无有效内容）";
+      updateTotals();
+      return;
+    }
+
+    $("#preview-box").textContent = "🤖 本地规则无法完全确定，正在调用 Gemini AI…";
+
+    try {
+      const aiResult = await callBetToolAI(text);
+
+      if (aiResult && aiResult.groups && aiResult.groups.length > 0) {
+        previewResult = aiResult;
+
+        let display = "🤖 AI解析结果\n\n" +
+          (aiResult.content || "（AI没有生成有效内容）");
+
+        if (aiResult.ai_low_confidence) {
+          display += "\n\n⚠️ AI置信度较低，请人工确认";
+        }
+
+        if (aiResult.warnings && aiResult.warnings.length) {
+          display += "\n\n⚠️ 提示：\n" + aiResult.warnings.join("\n");
+        }
+
+        $("#preview-box").textContent = display;
+      } else {
+        previewResult = localResult;
+        $("#preview-box").textContent =
+          (localResult.content || "（AI也无法确定）") + "\n\n⚠️ 建议人工检查";
+      }
+    } catch (aiError) {
+      previewResult = localResult;
+      $("#preview-box").textContent =
+        (localResult.content || "（本地解析无有效结果）") +
+        "\n\n⚠️ AI解析失败：" + aiError.message;
+    }
+
+  } catch (error) {
+    previewResult = null;
+    $("#preview-box").textContent = "解析错误：" + error.message;
   }
+
   updateTotals();
 }
 
@@ -314,7 +451,7 @@ async function onPaste() {
     const t = await navigator.clipboard.readText();
     if (!t) { toast("剪贴板为空"); return; }
     $("#raw-input").value = t;
-    doPreview();
+    doPreview(false);
   } catch(e) {
     toast("无法读取剪贴板，请长按输入框手动粘贴", 2500);
   }
@@ -382,7 +519,6 @@ function deleteRecord(seq) {
   toast(`已删除 #${seq}`);
 }
 
-// 渲染记录列表（显示全部，新的在最上面）
 function renderRecords() {
   const box = $("#records-list");
   const cnt = $("#records-count");
@@ -463,7 +599,6 @@ async function refreshWin() {
     $("#win-content").innerHTML = '<div class="empty">请输入澳门或香港开奖号码</div>'; return;
   }
 
-  // 按筛选用户过滤记录
   const filtered = state.winFilterUser === "全部"
     ? state.records
     : state.records.filter(r => (r.user || "") === state.winFilterUser);
@@ -658,7 +793,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   yearSel.value = state.year;
   yearSel.addEventListener("change", () => {
-    state.year = yearSel.value; saveLocal(); doPreview();
+    state.year = yearSel.value; saveLocal(); doPreview(false);
   });
   $("header").appendChild(yearSel);
 
@@ -669,7 +804,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   loadLocal();
   yearSel.value = state.year;
 
-  // 刷新用户栏和筛选栏 active
   $$(".user-bar button[data-user]").forEach(b =>
     b.classList.toggle("active", b.dataset.user === state.currentUser));
   $$(".user-bar button[data-winfilter]").forEach(b =>
