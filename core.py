@@ -266,6 +266,7 @@ def rebate_key_for_play(play: str) -> str:
     if m: return f"lianxiao_{m.group(1)}"
     if play == "二中二": return "pingma_2"
     if play == "三中三": return "pingma_3"
+    if play == "五不中": return "wubuzhong"
     return "global"
 
 
@@ -1591,7 +1592,22 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
             payout = win_stake * odds
             return True, "平特尾命中：" + ",".join(str(t)+"尾" for t in hit), win_stake, _odds_label(odds), payout, payout - group.total
         return False, "未中平特尾", 0.0, "", 0.0, -group.total
-
+    if play in {"五不中", "六不中", "七不中"}:
+        nums = _split_selection_numbers(group.selection_text)
+        if not nums:
+            return False, f"{play}未识别到号码", 0.0, "", 0.0, -group.total
+        
+        # 判断平码中是否出现了这些号码（特码不算）
+        hit_in_pingma = any(n in draw.pingma_set for n in nums)
+        
+        if not hit_in_pingma:
+            odds = odds_config.get("wubuzhong")
+            if odds is None:
+                return True, f"{play}命中（平码未包含所选号码）；未设置赔率", group.amount, "待填赔率", None, None
+            payout = group.amount * odds
+            return True, f"{play}命中", group.amount, _odds_label(odds), payout, payout - group.total
+        
+        return False, f"未中{play}", 0.0, "", 0.0, -group.total
     if play in {"二中二", "三中三"}:
         choose = 2 if play == "二中二" else 3
         from itertools import combinations
