@@ -18,6 +18,7 @@ const DEFAULT_ODDS = {
   lianxiao_4:30, lianxiao_4_ma:25,
   lianxiao_5:100, lianxiao_5_ma:85,
   pingma_2:null, pingma_3:null,
+  wubuzhong:null, // 加上这个
 };
 
 const ODDS_ITEMS = [
@@ -28,7 +29,7 @@ const ODDS_ITEMS = [
   ["lianxiao_3","三连肖（不带马）"],["lianxiao_3_ma","三连肖（带马）"],
   ["lianxiao_4","四连肖（不带马）"],["lianxiao_4_ma","四连肖（带马）"],
   ["lianxiao_5","五连肖（不带马）"],["lianxiao_5_ma","五连肖（带马）"],
-  ["pingma_2","二中二"],["pingma_3","三中三"],
+  ["pingma_2","二中二"],["pingma_3","三中三"],["wubuzhong","五不中"],
 ];
 
 const DEFAULT_REBATE = {
