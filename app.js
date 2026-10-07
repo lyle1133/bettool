@@ -47,9 +47,26 @@ const REBATE_ITEMS = [
   ["pingma_2","二中二"],["pingma_3","三中三"],["wubuzhong","五不中"],
 ];
 
-// ==================== Groq AI 直连 ====================
-// ⚠️⚠️⚠️ 请把下面换成你自己完整的 Groq 密钥（以 gsk_ 开头）⚠️⚠️⚠️
-const GROQ_API_KEY = "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";
+// ==================== API Key 本地管理 ====================
+const API_KEY_STORAGE = "bettool_groq_key";
+
+function getApiKey() {
+  return (localStorage.getItem(API_KEY_STORAGE) || "").trim();
+}
+
+function setApiKey(key) {
+  localStorage.setItem(API_KEY_STORAGE, (key || "").trim());
+}
+
+function clearApiKey() {
+  localStorage.removeItem(API_KEY_STORAGE);
+}
+
+function maskKey(key) {
+  if (!key) return "未设置";
+  if (key.length < 12) return "***";
+  return key.slice(0, 7) + "..." + key.slice(-4);
+}
 
 const AI_MIN_CONFIDENCE = 0.75;
 const AI_AUTO_FALLBACK = true; // 本地解析失败/严重警告时，是否允许自动兜底
@@ -372,9 +389,10 @@ async function pyRiskRows() {
 async function callBetToolAI(text) {
   if (!text || !text.trim()) return null;
 
-  // 检查密钥是否配置
-  if (!GROQ_API_KEY || !GROQ_API_KEY.startsWith("gsk_")) {
-    throw new Error("请先在 app.js 中配置有效的 GROQ_API_KEY");
+  const apiKey = getApiKey();  // ← 改这里
+
+  if (!apiKey || !apiKey.startsWith("gsk_")) {
+    throw new Error("请先在「设置」页填入你的 Groq API Key");
   }
 
   if (aiBusy) return null;
@@ -387,8 +405,14 @@ async function callBetToolAI(text) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${GROQ_API_KEY}`
+        "Authorization": `Bearer ${apiKey}`  // ← 和这里
       },
+      // ... 其余不变
+    });
+    // ...
+  }
+  // ...
+}
       body: JSON.stringify({
         model: "openai/gpt-oss-120b", // 如果不可用，可换成 "openai/gpt-oss-120b"
         messages: [
@@ -841,41 +865,53 @@ function renderSettings() {
   const hint = currentSettingsTab === "odds"
     ? "空白 = 待填赔率，不计算赔付"
     : "空白 = 跟随统一回水率";
-  const html = [`<div style="padding:8px;color:var(--muted);font-size:12px">${hint}</div>`];
+
+  const currentKey = getApiKey();
+
+  const apiKeyHtml = `
+    <div style="padding:12px;background:var(--card2);border-radius:10px;margin-bottom:12px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">
+        🤖 Groq API Key（仅保存在此浏览器本地，不会上传）
+      </div>
+      <input type="password" id="api-key-input"
+             placeholder="gsk_..."
+             value="${currentKey.replace(/"/g, '&quot;')}"
+             style="width:100%;font-size:14px;min-height:44px">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button onclick="onSaveApiKey()" style="flex:1;font-size:14px;padding:10px">保存密钥</button>
+        <button onclick="onClearApiKey()" class="danger" style="flex:1;font-size:14px;padding:10px">清除密钥</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">
+        当前状态：${maskKey(currentKey)}
+      </div>
+    </div>
+  `;
+
+  const html = [apiKeyHtml, `<div style="padding:8px;color:var(--muted);font-size:12px">${hint}</div>`];
   for (const [key, label] of items) {
-    const v = cfg[key];
-    const text = v === null || v === undefined ? "" : fmtNum(v);
-    html.push(`<div class="setting-row">
-      <label>${label}</label>
-      <input type="number" step="0.01" data-key="${key}" value="${text}" inputmode="decimal">
-      <span class="unit">${unit}</span>
-    </div>`);
+    // ... 原有循环不变
   }
   $("#settings-content").innerHTML = html.join("");
 }
-
-function onResetSettings() {
-  if (currentSettingsTab === "odds") state.odds = { ...DEFAULT_ODDS };
-  else state.rebate = { ...DEFAULT_REBATE };
+function onSaveApiKey() {
+  const inp = $("#api-key-input");
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (!val) { toast("请输入 API Key"); return; }
+  if (!val.startsWith("gsk_")) {
+    toast("格式错误：密钥应以 gsk_ 开头");
+    return;
+  }
+  setApiKey(val);
   renderSettings();
-  toast("已恢复默认（记得点保存）");
+  toast("已保存到本地浏览器");
 }
 
-function onSaveSettings() {
-  const inputs = $$("#settings-content input[data-key]");
-  const target = currentSettingsTab === "odds"
-    ? { ...state.odds } : { ...state.rebate };
-  for (const inp of inputs) {
-    const raw = inp.value.trim();
-    if (raw === "") { target[inp.dataset.key] = null; continue; }
-    const n = Number(raw);
-    if (!isFinite(n) || n < 0) { toast(`「${raw}」不是有效数字`); return; }
-    target[inp.dataset.key] = n;
-  }
-  if (currentSettingsTab === "odds") state.odds = target;
-  else state.rebate = target;
-  saveLocal();
-  toast("已保存");
+function onClearApiKey() {
+  if (!confirm("确定清除本地保存的 API Key？")) return;
+  clearApiKey();
+  renderSettings();
+  toast("已清除");
 }
 
 // ==================== Tab 切换 ====================
