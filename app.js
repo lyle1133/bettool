@@ -305,7 +305,7 @@ async function initPyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
   });
   lm.textContent = "正在加载解析内核…";
-  const coreSrc = await fetch("core.py").then(r => r.text());
+  const coreSrc = await fetch("core.py?v=6", { cache: "no-store" }).then(r => r.text());
 
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`
