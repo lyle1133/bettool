@@ -162,6 +162,11 @@ textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 
 .subtab-bar button{flex:1;min-height:40px;padding:8px 4px;font-size:12px;background:transparent;color:var(--muted)}
 .subtab-bar button.active{background:var(--accent);color:#fff}
 .subtab-content{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:12px}
+.summary-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:10px;border-bottom:1px solid var(--border)}
+.summary-stats>div{min-width:0;padding:10px;background:rgba(15,19,27,.66);border:1px solid var(--border);border-radius:10px}
+.summary-stats span{display:block;font-size:10px;color:var(--muted)}
+.summary-stats strong{display:block;font-size:17px;line-height:1.35;margin-top:5px;overflow-wrap:anywhere}
+
 .data-table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
 .data-table th{background:var(--panel-soft);padding:11px 9px;text-align:left;font-weight:750;position:sticky;top:0;z-index:1;border-bottom:1px solid var(--border);font-size:11px;color:#d8dfec}
 .data-table td{padding:10px 9px;border-bottom:1px solid var(--border);line-height:1.4}
