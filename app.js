@@ -381,14 +381,14 @@ async function callBetToolAI(text) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": \`Bearer \${apiKey}\`
+        "Authorization": "Bearer " + apiKey
       },
       signal: controller.signal,
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: "请按系统规则逐笔解析以下原文，不要遗漏任何一笔：\\n\\n" + text }
+          { role: "user", content: "请按系统规则逐笔解析以下原文，不要遗漏任何一笔：\n\n" + text }
         ],
         temperature: 0,
         response_format: { type: "json_object" }
@@ -397,7 +397,7 @@ async function callBetToolAI(text) {
 
     const responseText = await response.text();
     if (!response.ok) {
-      throw new Error(\`Groq API \${response.status}: \${responseText.slice(0, 800)}\`);
+      throw new Error("Groq API " + response.status + ": " + responseText.slice(0, 800));
     }
 
     let data;
@@ -407,14 +407,15 @@ async function callBetToolAI(text) {
       throw new Error("Groq API 响应不是有效 JSON");
     }
 
-    const textOutput = data?.choices?.[0]?.message?.content?.trim();
+    const textOutput = data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content
+      ? data.choices[0].message.content.trim() : "";
     if (!textOutput) throw new Error("Groq 没有返回有效解析结果");
 
     let ai;
     try {
       ai = JSON.parse(textOutput);
     } catch (e) {
-      // 兼容模型偶尔在 JSON 前后附带说明文字的情况，但不接受无完整对象的输出。
       const first = textOutput.indexOf("{");
       const last = textOutput.lastIndexOf("}");
       if (first < 0 || last <= first) {
@@ -441,13 +442,15 @@ async function callBetToolAI(text) {
     parsed.ai_raw = ai;
     parsed.ai_low_confidence = lowConfidence;
     parsed.ai_normalized_text = String(ai.normalized_text || "");
-    parsed.ai_unresolved = Array.isArray(ai.unresolved) ? ai.unresolved : [];
-    parsed.ai_complete = parsed.ai_complete === true && !lowConfidence && parsed.ai_unresolved.length === 0;
+    parsed.ai_unresolved = Array.isArray(parsed.unresolved)
+      ? parsed.unresolved
+      : (Array.isArray(ai.unresolved) ? ai.unresolved : []);
+    parsed.ai_complete = parsed.ai_complete === true &&
+      !lowConfidence && parsed.ai_unresolved.length === 0;
     parsed.raw_text = text;
-
     return parsed;
   } catch (error) {
-    if (error?.name === "AbortError") {
+    if (error && error.name === "AbortError") {
       throw new Error("AI请求超时（45秒），请稍后重试");
     }
     throw error;
@@ -457,7 +460,6 @@ async function callBetToolAI(text) {
     setStatus("🟢 本地解析 + AI");
   }
 }
-
 // ==================== 用户 & 筛选 ====================
 function switchUser(u) {
   state.currentUser = u;
@@ -583,7 +585,10 @@ async function onPaste() {
 }
 
 async function onAdd() {
-  if (!previewResult?.groups?.length) { toast("没有识别到有效内容"); return; }
+  if (!previewResult || !previewResult.groups || !previewResult.groups.length) {
+    toast("没有识别到有效内容");
+    return;
+  }
 
   const currentText = $("#raw-input").value.trim();
   const parsedText = String(previewResult.raw_text || "").trim();
@@ -598,19 +603,20 @@ async function onAdd() {
   const incomplete = previewResult.ai_complete === false;
   const lowConfidence = previewResult.ai_low_confidence === true;
   if (warnings.length || unresolved.length || incomplete || lowConfidence) {
-    const details = [
-      ...warnings.slice(0, 4),
-      ...unresolved.slice(0, 3).map(x => typeof x === "string" ? x : JSON.stringify(x))
-    ];
-    const reason = details.length ? "\\n\\n提示：\\n" + details.join("\\n") : "";
-    if (!confirm("解析结果带有提示或未完全确认内容。请先核对每一笔的玩法、号码和金额。\\n\\n仍然添加当前预览吗？" + reason)) {
+    const details = warnings.slice(0, 4).concat(
+      unresolved.slice(0, 3).map(x => typeof x === "string" ? x : JSON.stringify(x))
+    );
+    const reason = details.length ? "\n\n提示：\n" + details.join("\n") : "";
+    if (!confirm("解析结果带有提示或未完全确认内容。请先核对每一笔的玩法、号码和金额。\n\n仍然添加当前预览吗？" + reason)) {
       return;
     }
   }
 
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
-  const ts = \`\${now.getFullYear()}-\${pad(now.getMonth()+1)}-\${pad(now.getDate())} \${pad(now.getHours())}:\${pad(now.getMinutes())}:\${pad(now.getSeconds())}\`;
+  const ts = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" +
+    pad(now.getDate()) + " " + pad(now.getHours()) + ":" +
+    pad(now.getMinutes()) + ":" + pad(now.getSeconds());
   const region = /香港|港彩|港/.test(previewResult.raw_text) ? "香港" : "澳门";
   const rec = {
     seq: state.records.length + 1,
@@ -620,8 +626,8 @@ async function onAdd() {
     created_at: ts,
     groups: previewResult.groups,
     warnings: warnings,
-    region,
-    user: state.currentUser,
+    region: region,
+    user: state.currentUser
   };
   state.records.push(rec);
   $("#raw-input").value = "";
@@ -631,9 +637,8 @@ async function onAdd() {
   updateTotals();
   renderRecords();
   saveLocal();
-  toast(\`[\${rec.user}] 已添加 #\${rec.seq}: \${fmtNum(rec.amount)}\`);
+  toast("[" + rec.user + "] 已添加 #" + rec.seq + ": " + fmtNum(rec.amount));
 }
-
 function onCopy() {
   if (!previewResult?.content) { toast("没有可复制内容"); return; }
   navigator.clipboard.writeText(previewResult.content)
