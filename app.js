@@ -1256,6 +1256,8 @@ function renderRisk(rows) {
   }
 
   const head = rows[0];
+  const profitIndex = head.indexOf("预计盈亏");
+  const riskIndex = head.indexOf("风险等级");
   const summaryRow = rows.slice(1).find(r => String(r[0] || "").includes("统计"));
   const bodyRows = rows.slice(1).filter(r => !String(r[0] || "").includes("统计"));
 
@@ -1264,15 +1266,15 @@ function renderRisk(rows) {
     summaryHtml = `<div class="risk-summary">
       <span class="max">📈 最大盈亏：${summaryRow[1] || "-"}</span>
       <span class="min">📉 最小盈亏：${summaryRow[2] || "-"}</span>
-      <span class="avg">📊 平均：${summaryRow[9] || "-"}</span>
+      <span class="avg">📊 平均：${summaryRow[profitIndex >= 0 ? profitIndex : 3] || "-"}</span>
     </div>`;
   }
 
   const th = head.map(h => `<th>${h}</th>`).join("");
 
   const tr = bodyRows.map(row => {
-    const profit = row[9];
-    const level = String(row[11] || "");
+    const profit = row[profitIndex >= 0 ? profitIndex : 3];
+    const level = String(row[riskIndex >= 0 ? riskIndex : row.length - 1] || "");
     let rowCls = "risk-unknown";
     if (level.includes("🔴") || level.includes("[高]")) rowCls = "risk-high";
     else if (level.includes("🟡") || level.includes("[中]")) rowCls = "risk-mid";
@@ -1284,7 +1286,7 @@ function renderRisk(rows) {
       : (profitNum > 0 ? "+" : "") + fmtNum(profitNum);
 
     const tds = row.map((v, i) => {
-      if (i === 9) return `<td class="${profitCls}">${profitText}</td>`;
+      if (i === profitIndex) return `<td class="${profitCls}">${profitText}</td>`;
       return `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`;
     }).join("");
 
