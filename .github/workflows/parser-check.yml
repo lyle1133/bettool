@@ -24,5 +24,6 @@ jobs:
         run: |
           node --check app.js
           node --check learning.js
+          node tests/test_learning_logic.js
       - name: Run parser regression tests
         run: python -m unittest discover -s tests -v
