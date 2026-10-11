@@ -5,6 +5,7 @@
 const LEARNING_KEY = "bettool_learning_cases_v1";
 const MAX_LEARNING_CASES = 1000;
 const MAX_UNRESOLVED_CASES = 500;
+const MAX_LEARNING_DELETIONS = 2000;
 
 const LEARNING_SYNC_URL_KEY = "bettool_sync_url_v1";
 const LEARNING_SYNC_TOKEN_KEY = "bettool_sync_token_v1";
@@ -19,6 +20,7 @@ let learningStore = {
   version: 1,
   cases: [],
   unresolved: [],
+  deleted: [],
   metrics: { confirmed: 0, corrected: 0, markedUnresolved: 0, exactHits: 0, retrievals: 0 }
 };
 
@@ -88,11 +90,28 @@ function sanitizeLearningCase(value) {
   };
 }
 
+
+function sanitizeLearningTombstone(value) {
+  if (!value || typeof value !== "object" || typeof value.raw_text !== "string") return null;
+  const rawText = value.raw_text.trim();
+  if (!rawText || rawText.length > 10000) return null;
+  return {
+    id: String(value.id || "").slice(0, 100),
+    raw_text: rawText,
+    year_animal: String(value.year_animal || "马").slice(0, 8),
+    deleted_at: String(value.deleted_at || new Date().toISOString()).slice(0, 50)
+  };
+}
+
 function loadLearningStore() {
   try {
     const raw = localStorage.getItem(LEARNING_KEY);
     if (!raw) {
       updateLearningUI();
+      const cfg = getLearningSyncConfig();
+      if (cfg.url && cfg.token && typeof setTimeout === "function") {
+        setTimeout(() => syncLearningNow(true), 900);
+      }
       return;
     }
     const data = JSON.parse(raw);
@@ -108,6 +127,8 @@ function loadLearningStore() {
           created_at: String(x.created_at || new Date().toISOString()),
           note: String(x.note || "").slice(0, 1000)
         })).slice(-MAX_UNRESOLVED_CASES) : [],
+      deleted: (Array.isArray(data.deleted) ? data.deleted : [])
+        .map(sanitizeLearningTombstone).filter(Boolean).slice(-MAX_LEARNING_DELETIONS),
       metrics: { ...learningMetricDefaults(), ...(data.metrics || {}) }
     };
     for (const k of Object.keys(learningMetricDefaults())) {
@@ -116,7 +137,7 @@ function loadLearningStore() {
     }
   } catch (e) {
     console.warn("学习案例库加载失败：", e);
-    learningStore = { version: 1, cases: [], unresolved: [], metrics: learningMetricDefaults() };
+    learningStore = { version: 1, cases: [], unresolved: [], deleted: [], metrics: learningMetricDefaults() };
     toast("学习案例库无法读取，已使用空学习库；未自动删除原始数据", 3500);
   }
   updateLearningUI();
@@ -130,6 +151,8 @@ function saveLearningStore() {
   try {
     learningStore.cases = learningStore.cases.slice(-MAX_LEARNING_CASES);
     learningStore.unresolved = learningStore.unresolved.slice(-MAX_UNRESOLVED_CASES);
+    learningStore.deleted = (Array.isArray(learningStore.deleted) ? learningStore.deleted : [])
+      .map(sanitizeLearningTombstone).filter(Boolean).slice(-MAX_LEARNING_DELETIONS);
     localStorage.setItem(LEARNING_KEY, JSON.stringify(learningStore));
     updateLearningUI();
     if (!suppressLearningAutoSync && learningSyncReady) scheduleLearningSync();
@@ -203,8 +226,9 @@ function saveLearningSyncConfig() {
 function mergeLearningStores(localData, remoteData) {
   const local = localData && typeof localData === "object" ? localData : {};
   const remote = remoteData && typeof remoteData === "object" ? remoteData : {};
-  const byKey = new Map();
   const caseKey = item => String(item.year_animal || "马") + "|" + learningTextKey(item.raw_text);
+  const byKey = new Map();
+
   for (const raw of [...(Array.isArray(remote.cases) ? remote.cases : []),
                      ...(Array.isArray(local.cases) ? local.cases : [])]) {
     const item = sanitizeLearningCase(raw);
@@ -213,6 +237,28 @@ function mergeLearningStores(localData, remoteData) {
     const old = byKey.get(key);
     if (!old || String(item.updated_at || "") >= String(old.updated_at || "")) byKey.set(key, item);
   }
+
+  const deletionMap = new Map();
+  for (const raw of [...(Array.isArray(remote.deleted) ? remote.deleted : []),
+                     ...(Array.isArray(local.deleted) ? local.deleted : [])]) {
+    const item = sanitizeLearningTombstone(raw);
+    if (!item) continue;
+    const key = caseKey(item);
+    const old = deletionMap.get(key);
+    if (!old || String(item.deleted_at) >= String(old.deleted_at)) deletionMap.set(key, item);
+  }
+
+  const allCases = Array.from(byKey.values());
+  const cases = allCases.filter(item => {
+    const deletion = deletionMap.get(caseKey(item));
+    return !deletion || String(item.updated_at || "") > String(deletion.deleted_at || "");
+  });
+  const deleted = Array.from(deletionMap.values()).filter(item => {
+    const existing = byKey.get(caseKey(item));
+    return !existing || String(item.deleted_at || "") >= String(existing.updated_at || "");
+  }).sort((a, b) => String(a.deleted_at).localeCompare(String(b.deleted_at)))
+    .slice(-MAX_LEARNING_DELETIONS);
+
   const unresolvedMap = new Map();
   const unresolvedKey = item => learningTextKey(item.raw_text) + "|" +
     String(item.created_at || "") + "|" + String(item.note || "");
@@ -236,10 +282,11 @@ function mergeLearningStores(localData, remoteData) {
   }
   return {
     version: 1,
-    cases: Array.from(byKey.values()).sort((a, b) =>
-      String(a.updated_at).localeCompare(String(b.updated_at))).slice(-MAX_LEARNING_CASES),
+    cases: cases.sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)))
+      .slice(-MAX_LEARNING_CASES),
     unresolved: Array.from(unresolvedMap.values()).sort((a, b) =>
       String(a.created_at).localeCompare(String(b.created_at))).slice(-MAX_UNRESOLVED_CASES),
+    deleted,
     metrics
   };
 }
@@ -285,6 +332,8 @@ async function syncLearningNow(silent) {
   }
 
   learningSyncBusy = true;
+  let finalStatusMessage = "";
+  let finalStatusIsError = false;
   setLearningSyncStatus("正在连接云端并合并本地案例…", false);
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -329,20 +378,25 @@ async function syncLearningNow(silent) {
       learningSyncRevision = Number(saved.revision || payload.expected_revision + 1);
       learningSyncReady = true;
       updateLearningUI();
-      setLearningSyncStatus("✅ 云端同步成功 · 版本 " + learningSyncRevision +
-        " · 案例 " + learningStore.cases.length + " 条", false);
+      finalStatusMessage = "✅ 云端同步成功 · 版本 " + learningSyncRevision +
+        " · 案例 " + learningStore.cases.length + " 条";
+      finalStatusIsError = false;
+      setLearningSyncStatus(finalStatusMessage, false);
       if (!silent) toast("云端同步完成");
       return true;
     }
     throw new Error("多设备数据持续冲突。请稍后再次点击“立即同步”。");
   } catch (e) {
     console.warn("云端学习库同步失败：", e);
-    setLearningSyncStatus("同步失败：" + e.message + "；本地数据未清除。", true);
+    finalStatusMessage = "同步失败：" + e.message + "；本地数据未清除。";
+    finalStatusIsError = true;
+    setLearningSyncStatus(finalStatusMessage, true);
     if (!silent) toast("同步失败：" + e.message, 4500);
     return false;
   } finally {
     learningSyncBusy = false;
     updateLearningUI();
+    if (finalStatusMessage) setLearningSyncStatus(finalStatusMessage, finalStatusIsError);
   }
 }
 
@@ -395,6 +449,8 @@ function recordVerifiedLearningCase(rawText, result, correctedText, source) {
   }
   if (idx >= 0) learningStore.cases.splice(idx, 1);
   learningStore.cases.push(item);
+  learningStore.deleted = (Array.isArray(learningStore.deleted) ? learningStore.deleted : [])
+    .filter(d => !(d.year_animal === year && learningTextKey(d.raw_text) === key));
   learningStore.metrics.confirmed += 1;
   if (source === "corrected") learningStore.metrics.corrected += 1;
   return saveLearningStore();
@@ -641,9 +697,19 @@ function toggleLearningRecent() {
 
 function deleteLearningCase(id) {
   if (!confirm("确定删除这条已确认学习案例？")) return;
+  const item = learningStore.cases.find(c => c.id === id);
+  if (item) {
+    if (!Array.isArray(learningStore.deleted)) learningStore.deleted = [];
+    learningStore.deleted.push({
+      id: item.id,
+      raw_text: item.raw_text,
+      year_animal: item.year_animal,
+      deleted_at: new Date().toISOString()
+    });
+  }
   learningStore.cases = learningStore.cases.filter(c => c.id !== id);
   saveLearningStore();
-  toast("已删除学习案例");
+  toast("已删除学习案例；同步启用后会同步删除到其他设备");
 }
 
 function exportLearningData() {
@@ -653,6 +719,7 @@ function exportLearningData() {
     exported_at: new Date().toISOString(),
     cases: learningStore.cases,
     unresolved: learningStore.unresolved,
+    deleted: learningStore.deleted || [],
     metrics: learningStore.metrics
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
