@@ -867,14 +867,15 @@ function isSevereWarning(w) {
   return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
 }
 
-async function doPreview(allowAI = false, forceAI = false) {
+async function doPreview(allowAI = false, forceAI = false, forceChunks = false) {
   const requestId = ++previewRequestId;
   if (!coreReady) return;
 
   const text = $("#raw-input").value.trim();
   if (!text) {
     previewResult = null;
-    $("#preview-box").textContent = "（等待输入）";
+    renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
+    setAiStatus("输入内容后会先进行本地预览；需要 AI 辅助时点击“智能解析”。", "idle");
     updateTotals();
     return;
   }
@@ -882,9 +883,11 @@ async function doPreview(allowAI = false, forceAI = false) {
   const isCurrentRequest = () =>
     requestId === previewRequestId && $("#raw-input").value.trim() === text;
 
-  // 命中人工确认过的完全相同原文时，直接复用已确认结构化结果，不再让模型重新猜。
+  if (allowAI) setAiStatus("正在检查输入并准备 AI 解析…", "busy");
+
+  // 命中人工确认过的完全相同原文时，直接复用结构化结果，不让模型重新猜。
   const exactCase = findExactLearningCase(text);
-  if (exactCase) {
+  if (exactCase && !forceAI && !forceChunks) {
     const result = JSON.parse(JSON.stringify(exactCase.snapshot));
     result.raw_text = text;
     result.normalized_text = exactCase.corrected_text;
@@ -900,9 +903,8 @@ async function doPreview(allowAI = false, forceAI = false) {
       saveLearningStore();
     }
     previewResult = result;
-    $("#preview-box").textContent =
-      "🧠 命中你人工确认过的学习案例（无需重新调用 AI）\n\n" +
-      (result.content || "（已确认案例没有展示文本）");
+    renderPreviewResult(result, "命中人工确认的学习案例");
+    setAiStatus("已命中已确认案例，无需重新调用 AI。添加前仍建议核对结果。", "success");
     updateTotals();
     return;
   }
@@ -916,75 +918,82 @@ async function doPreview(allowAI = false, forceAI = false) {
     const warnings = Array.isArray(localResult.warnings) ? localResult.warnings : [];
     const localEmpty = groups.length === 0;
     const severe = warnings.some(isSevereWarning);
-    const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || localEmpty || severe);
+    const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || forceChunks || localEmpty || severe);
 
     if (!needAI) {
-      $("#preview-box").textContent = localResult.content || "（无有效内容）";
+      renderPreviewResult(localResult, "本地规则解析结果");
+      setAiStatus(localEmpty || severe
+        ? "本地规则发现未识别内容；可以点击“智能解析”尝试 AI 辅助。"
+        : "本地规则预览已完成。添加前请核对所有号码与金额。", localEmpty || severe ? "idle" : "success");
       updateTotals();
       return;
     }
 
-    const similarCases = findSimilarLearningCases(text, 3);
-    $("#preview-box").textContent =
-      "🤖 本地规则无法完全确定，正在调用 Groq AI…" +
-      (similarCases.length ? "\n🧠 找到 " + similarCases.length + " 条已确认的相似案例，正在作为参考" : "");
+    const similarCases = forceChunks ? [] : findSimilarLearningCases(text, 3);
+    renderPreviewEmpty("本地规则需要进一步确认，正在调用 AI…" +
+      (similarCases.length ? " 已找到 " + similarCases.length + " 条相似学习案例。" : ""));
+    setAiStatus(forceChunks
+      ? "正在用较短提示词分段重试；较长内容可能需要等待服务额度恢复。"
+      : "正在调用 Groq AI，并保留本地解析结果…", "busy");
 
     try {
-      const aiResult = await callBetToolAI(text, similarCases);
+      const aiResult = await callBetToolAI(text, similarCases, { forceChunking: forceChunks });
       if (!isCurrentRequest()) return;
 
-      if (similarCases.length) {
+      if (similarCases.length && aiResult) {
         learningStore.metrics.retrievals += 1;
         saveLearningStore();
-        if (aiResult) aiResult.ai_learning_examples_count = similarCases.length;
+        aiResult.ai_learning_examples_count = similarCases.length;
       }
 
-      if (aiResult && aiResult.groups && aiResult.groups.length > 0) {
+      if (aiResult && Array.isArray(aiResult.groups) && aiResult.groups.length > 0) {
         previewResult = aiResult;
-        let display = "🤖 AI解析结果\n\n" + (aiResult.content || "（AI没有生成有效内容）");
-
-        if (similarCases.length) {
-          display += "\n\n🧠 参考了 " + similarCases.length + " 条已确认案例";
+        renderPreviewResult(aiResult, aiResult.ai_chunk_count
+          ? "AI 分段解析结果"
+          : (aiResult.ai_prompt_compacted ? "AI 精简提示词解析结果" : "AI 解析结果"));
+        if (aiResult.ai_chunk_count > 1) {
+          setAiStatus("长文本分段解析完成。请重点核对分段处的玩法标题、号码组与金额。", "success");
+        } else if (aiResult.ai_low_confidence || aiResult.ai_complete === false ||
+                   (Array.isArray(aiResult.warnings) && aiResult.warnings.length)) {
+          setAiStatus("AI 已返回结果，但存在需要核对的内容；请逐项确认后再添加。", "success");
+        } else {
+          setAiStatus("AI 解析完成。请核对结果后再添加到记录。", "success");
         }
-        if (aiResult.ai_low_confidence || aiResult.ai_complete === false) {
-          display += "\n\n⚠️ 结果可能不完整或存在歧义，添加前请逐项核对";
-        }
-        if (aiResult.warnings && aiResult.warnings.length) {
-          display += "\n\n⚠️ 解析提示：\n" + aiResult.warnings.join("\n");
-        }
-        if (aiResult.ai_unresolved && aiResult.ai_unresolved.length) {
-          display += "\n\n❓ 未能确定的原文：\n" + aiResult.ai_unresolved.map(x =>
-            typeof x === "string" ? x : JSON.stringify(x)
-          ).join("\n");
-        }
-        $("#preview-box").textContent = display;
       } else {
         previewResult = localResult;
-        $("#preview-box").textContent =
-          (localResult.content || "（AI也无法确定）") + "\n\n⚠️ AI未能生成可用解析，请检查原文或手动拆分";
+        renderAiFailure(new Error("AI 未能生成有效分组。请检查原文或手动拆分。"), localResult);
+        setAiStatus("AI 未返回可用分组；本地解析结果已保留。", "error");
       }
     } catch (aiError) {
       if (!isCurrentRequest()) return;
       previewResult = localResult;
-      $("#preview-box").textContent =
-        (localResult.content || "（本地解析无有效结果）") +
-        "\n\n⚠️ AI解析失败：" + aiError.message;
+      renderAiFailure(aiError, localResult);
+      setAiStatus("AI 本次未完成；输入内容和本地解析结果已保留。", "error");
     }
   } catch (error) {
     if (!isCurrentRequest()) return;
     previewResult = null;
-    $("#preview-box").textContent = "解析错误：" + error.message;
+    renderPreviewEmpty("解析引擎出现错误：" + error.message);
+    setPreviewBadge("解析失败", "danger");
+    setAiStatus("本地解析引擎出错，请刷新页面重试。", "error");
   }
 
   if (isCurrentRequest()) updateTotals();
 }
-
 function updateTotals() {
-  const p = previewResult?.total || 0;
-  const r = state.records.reduce((s, x) => s + Number(x.amount || 0), 0);
-  $("#totals").textContent = `预览金额：${fmtNum(p)}　|　记录合计：${fmtNum(r)}`;
+  const previewTotal = previewResult ? fmtNum(previewResult.total || 0) : "—";
+  const recordsTotal = state.records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const totals = $("#totals");
+  if (totals) {
+    totals.innerHTML =
+      '<span class="preview-total"><span>预览金额</span><strong>' + escapeHtml(previewTotal) + '</strong></span>' +
+      '<span><span>记录合计</span><strong>' + escapeHtml(fmtNum(recordsTotal)) + '</strong></span>';
+  }
+  const addButton = $("#btn-add");
+  if (addButton) addButton.disabled = !previewResult || !Array.isArray(previewResult.groups) || !previewResult.groups.length;
+  const copyButton = $("#btn-copy");
+  if (copyButton) copyButton.disabled = !previewResult || !previewResult.content;
 }
-
 async function onPaste() {
   try {
     const t = await navigator.clipboard.readText();
@@ -1043,7 +1052,7 @@ async function onAdd() {
   };
   state.records.push(rec);
   $("#raw-input").value = "";
-  $("#preview-box").textContent = "（等待输入）";
+  renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
   previewResult = null;
   previewRequestId += 1;
   updateTotals();
@@ -1064,6 +1073,7 @@ function onClearInput() {
   $("#raw-input").value = "";
   $("#preview-box").textContent = "（等待输入）";
   previewResult = null;
+  setAiStatus("已清空输入框。", "idle");
   updateTotals();
 }
 async function onClearAll() {
@@ -1092,7 +1102,7 @@ function renderRecords() {
   const cnt = $("#records-count");
   if (!box) return;
 
-  if (cnt) cnt.textContent = state.records.length;
+  if (cnt) cnt.textContent = state.records.length + " 条";
 
   if (!state.records.length) {
     box.innerHTML = '<div class="empty">还没有记录</div>';
@@ -1141,18 +1151,26 @@ function renderSubtab(sum) {
   const box = $("#summary-content");
   const data = sum[currentSubtab] || [];
   if (!data.length) { box.innerHTML = '<div class="empty">无数据</div>'; return; }
+  const totalAmount = state.records.reduce((total, record) => total + Number(record.amount || 0), 0);
+  const groupCount = state.records.reduce((total, record) =>
+    total + (Array.isArray(record.groups) ? record.groups.length : 0), 0);
+  const stats = '<div class="summary-stats">' +
+    '<div><span>记录笔数</span><strong>' + state.records.length + '</strong></div>' +
+    '<div><span>记录总额</span><strong>' + escapeHtml(fmtNum(totalAmount)) + '</strong></div>' +
+    '<div><span>分组数量</span><strong>' + groupCount + '</strong></div>' +
+    '</div>';
   const head = {
     numbers: ["号码","生肖","波色","尾","次数","金额"],
-    zodiac:  ["生肖","对应号码","金额"],
-    plays:   ["玩法","笔/组","金额"],
+    zodiac: ["生肖","对应号码","金额"],
+    plays: ["玩法","笔/组","金额"]
   }[currentSubtab];
-  const th = head.map(h => `<th>${h}</th>`).join("");
+  const th = head.map(h => "<th>" + escapeHtml(h) + "</th>").join("");
   const tr = data.map(row => "<tr>" + row.map(v =>
-    `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`
+    "<td>" + escapeHtml(typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")) + "</td>"
   ).join("") + "</tr>").join("");
-  box.innerHTML = `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+  box.innerHTML = stats + '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+    th + '</tr></thead><tbody>' + tr + '</tbody></table></div>';
 }
-
 // ==================== 中奖页 ====================
 function onRefreshWin() { saveLocal(); refreshWin(); }
 
@@ -1190,7 +1208,7 @@ async function refreshWin() {
     const title = state.winFilterUser === "全部" ? "" :
       `<div style="padding:8px;color:var(--accent);font-size:13px;font-weight:600">当前筛选：用户 ${state.winFilterUser}</div>`;
     $("#win-content").innerHTML = title +
-      `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+      `<div class="table-wrap"><table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
   } catch(e) {
     $("#win-content").innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
   }
@@ -1406,7 +1424,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   yearSel.addEventListener("change", () => {
     state.year = yearSel.value; saveLocal(); doPreview(false);
   });
-  $("header").appendChild(yearSel);
+  const headerRight = $(".header-right");
+  (headerRight || $("header")).appendChild(yearSel);
 
   $("#raw-input").addEventListener("input", schedulePreview);
   $("#macau-draw").addEventListener("input", saveLocal);
