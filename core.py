@@ -1388,6 +1388,35 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
 
     if pending_text():
         flush_pending_warning("末尾存在未处理内容")
+
+    # 多行二中二/三中三区块在预处理前被独立提取。将所有结果按原文位置排序，
+    # 避免该区块总是被放到普通下注前面。未知来源保持稳定顺序并排在末尾。
+    if len(parsed.groups) > 1:
+        source_search_cursor = {}
+
+        def _group_source_position(group: BetGroup, original_index: int) -> Tuple[int, int]:
+            source = str(group.source or "").strip()
+            if not source:
+                return len(normalized_full) + original_index, original_index
+            normalized_source = preprocess_text(source).strip("| \\t\\r\\n")
+            candidates = []
+            for candidate in (normalized_source, source):
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+            for candidate in candidates:
+                cursor = source_search_cursor.get(candidate, 0)
+                position = normalized_full.find(candidate, cursor)
+                if position < 0:
+                    position = normalized_full.find(candidate)
+                if position >= 0:
+                    source_search_cursor[candidate] = position + len(candidate)
+                    return position, original_index
+            return len(normalized_full) + original_index, original_index
+
+        indexed_groups = list(enumerate(parsed.groups))
+        indexed_groups.sort(key=lambda pair: _group_source_position(pair[1], pair[0]))
+        parsed.groups = [group for _index, group in indexed_groups]
+
     if not parsed.groups:
         parsed.warnings.append("没有生成任何有效押注内容")
     return parsed
