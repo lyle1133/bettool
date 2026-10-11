@@ -132,4 +132,39 @@ assert.throws(
   /https/
 );
 
+
+const deletionRecord = {
+  id: "local-old",
+  raw_text: sample.raw_text,
+  year_animal: "马",
+  deleted_at: "2026-02-01T00:00:00.000Z"
+};
+const deletedMerge = vm.runInContext(
+  "mergeLearningStores(" + JSON.stringify({
+    version: 1, cases: [localCase], deleted: [],
+    unresolved: [], metrics: {}
+  }) + ", " + JSON.stringify({
+    version: 1, cases: [], deleted: [deletionRecord],
+    unresolved: [], metrics: {}
+  }) + ")",
+  context
+);
+assert.equal(deletedMerge.cases.length, 0, "a newer deletion marker should remove an older case");
+assert.equal(deletedMerge.deleted.length, 1, "deletion marker must survive sync");
+
+const recreatedCase = {
+  ...localCase,
+  id: "recreated",
+  updated_at: "2026-03-01T00:00:00.000Z"
+};
+const recreatedMerge = vm.runInContext(
+  "mergeLearningStores(" + JSON.stringify({
+    version: 1, cases: [recreatedCase], deleted: [deletionRecord],
+    unresolved: [], metrics: {}
+  }) + ", " + JSON.stringify({ version: 1, cases: [], deleted: [], unresolved: [], metrics: {} }) + ")",
+  context
+);
+assert.equal(recreatedMerge.cases.length, 1, "newer explicitly re-confirmed case should beat old deletion");
+assert.equal(recreatedMerge.deleted.length, 0, "obsolete deletion marker should be removed");
+
 console.log("Learning module tests passed");
