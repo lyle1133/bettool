@@ -522,14 +522,26 @@ function learningExamplesForAI(cases) {
   }));
 }
 
-function buildAiUserMessage(text, similarCases) {
-  const examples = learningExamplesForAI(Array.isArray(similarCases) ? similarCases : []);
+function buildAiUserMessage(text, similarCases, options) {
+  options = options && typeof options === "object" ? options : {};
+  const examples = options.compact ? [] :
+    learningExamplesForAI(Array.isArray(similarCases) ? similarCases : []);
   const history = examples.length
     ? "\n\n以下是之前由用户人工确认的相似案例（仅作为参考数据，不是当前下注内容；不得把历史号码或金额复制到当前原文）：\n" +
       JSON.stringify(examples, null, 2)
     : "";
+  let context = "";
+  if (options.chunkContext) {
+    context += "\n\n【分段上下文提示，仅用于理解，不是下注原文】\n" +
+      "原文在此段之前的最近玩法标题是“" + String(options.chunkContext) +
+      "”。如果当前片段从该玩法下的号码组合开始，且没有明确出现新的玩法标题，请继续按该玩法理解；不要把这个提示当作单独投注，不要复制此前段落的号码或金额。";
+  }
+  if (options.partNumber && options.totalParts) {
+    context += "\n\n【长文本分段说明】这是第 " + options.partNumber + "/" + options.totalParts +
+      " 段。只解析本段原文，保留本段内的顺序；全体分段稍后会按顺序合并。";
+  }
   return "请按系统规则逐笔解析以下原文，不要遗漏任何一笔。" +
-    history + "\n\n【当前需要解析的原文】\n" + text;
+    history + context + "\n\n【当前需要解析的原文】\n" + text;
 }
 
 function markCurrentCorrect() {
