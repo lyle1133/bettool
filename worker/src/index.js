@@ -1,10 +1,12 @@
 const MAX_BODY_BYTES = 900000;
 const MAX_CASES = 1000;
 const MAX_UNRESOLVED = 500;
+const MAX_DELETED = 2000;
 const EMPTY_STORE = {
   version: 1,
   cases: [],
   unresolved: [],
+  deleted: [],
   metrics: { confirmed: 0, corrected: 0, markedUnresolved: 0, exactHits: 0, retrievals: 0 }
 };
 
@@ -36,8 +38,10 @@ function normalizeStore(value) {
   }
   const cases = Array.isArray(value.cases) ? value.cases : [];
   const unresolved = Array.isArray(value.unresolved) ? value.unresolved : [];
+  const deleted = Array.isArray(value.deleted) ? value.deleted : [];
   if (cases.length > MAX_CASES) throw new Error("too_many_cases");
   if (unresolved.length > MAX_UNRESOLVED) throw new Error("too_many_unresolved");
+  if (deleted.length > MAX_DELETED) throw new Error("too_many_deletions");
 
   const cleanCases = [];
   for (const item of cases) {
@@ -99,6 +103,15 @@ function normalizeStore(value) {
       note: String(item.note || "").slice(0, 1000)
     }));
 
+  const cleanDeleted = deleted
+    .filter(item => item && typeof item.raw_text === "string" && item.raw_text.trim())
+    .map(item => ({
+      id: String(item.id || "").slice(0, 100),
+      raw_text: String(item.raw_text).slice(0, 10000),
+      year_animal: String(item.year_animal || "马").slice(0, 8),
+      deleted_at: String(item.deleted_at || new Date().toISOString()).slice(0, 50)
+    }));
+
   const sourceMetrics = value.metrics && typeof value.metrics === "object" ? value.metrics : {};
   const metrics = {};
   for (const key of Object.keys(EMPTY_STORE.metrics)) {
@@ -109,6 +122,7 @@ function normalizeStore(value) {
     version: 1,
     cases: cleanCases.slice(-MAX_CASES),
     unresolved: cleanUnresolved.slice(-MAX_UNRESOLVED),
+    deleted: cleanDeleted.slice(-MAX_DELETED),
     metrics
   };
 }
