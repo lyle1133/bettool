@@ -1071,7 +1071,7 @@ function onClearInput() {
   if (activeAiController) activeAiController.abort();
   previewRequestId += 1;
   $("#raw-input").value = "";
-  $("#preview-box").textContent = "（等待输入）";
+  renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
   previewResult = null;
   setAiStatus("已清空输入框。", "idle");
   updateTotals();
