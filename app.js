@@ -1005,7 +1005,7 @@ function updateTotals() {
   const addButton = $("#btn-add");
   if (addButton) addButton.disabled = !previewResult || !Array.isArray(previewResult.groups) || !previewResult.groups.length;
   const copyButton = $("#btn-copy");
-  if (copyButton) copyButton.disabled = !previewResult || !previewResult.content;
+  if (copyButton) copyButton.disabled = !previewResult || !(previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text);
 }
 async function onPaste() {
   try {
@@ -1055,7 +1055,7 @@ async function onAdd() {
   const rec = {
     seq: state.records.length + 1,
     raw_text: previewResult.raw_text,
-    bet_content: previewResult.content,
+    bet_content: String(previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text || ""),
     amount: previewResult.total,
     created_at: ts,
     groups: previewResult.groups,
@@ -1074,8 +1074,11 @@ async function onAdd() {
   toast("[" + rec.user + "] 已添加 #" + rec.seq + ": " + fmtNum(rec.amount));
 }
 function onCopy() {
-  if (!previewResult?.content) { toast("没有可复制内容"); return; }
-  navigator.clipboard.writeText(previewResult.content)
+  const text = previewResult && (
+    previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text
+  );
+  if (!text) { toast("没有可复制内容"); return; }
+  navigator.clipboard.writeText(text)
     .then(() => toast("已复制"))
     .catch(() => toast("复制失败，请长按输入框手动复制"));
 }
