@@ -1398,7 +1398,7 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
             source = str(group.source or "").strip()
             if not source:
                 return len(normalized_full) + original_index, original_index
-            normalized_source = preprocess_text(source).strip("| \\t\\r\\n")
+            normalized_source = preprocess_text(source).strip("| \t\r\n")
             candidates = []
             for candidate in (normalized_source, source):
                 if candidate and candidate not in candidates:
