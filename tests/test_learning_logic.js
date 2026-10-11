@@ -23,7 +23,8 @@ const context = {
   Array,
   Set,
   Object,
-  RegExp
+  RegExp,
+  URL
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("learning.js", "utf8"), context);
