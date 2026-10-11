@@ -234,6 +234,36 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 
 .profit-pos { color: #f26666; font-weight: bold; }
 .profit-neg { color: #59d97a; font-weight: bold; }
+
+#learning-panel{
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:12px;display:flex;flex-direction:column;gap:9px;
+}
+#learning-panel .learning-title{font-size:14px;font-weight:650}
+#learning-panel .learning-help{font-size:12px;color:var(--muted);line-height:1.5}
+#learning-stats{font-size:12px;color:var(--muted);line-height:1.6}
+.learning-btn-row{display:flex;gap:7px;flex-wrap:wrap}
+.learning-btn-row button{font-size:13px;padding:10px 9px;min-height:40px}
+.learning-btn-row .learn-good{background:#163f2a;color:#b9f6ce}
+.learning-btn-row .learn-correct{background:#493819;color:#ffe2a6}
+.learning-btn-row .learn-unknown{background:#303642;color:#eef0f3}
+#learning-recent{display:flex;flex-direction:column;gap:7px}
+.learning-case{
+  border:1px solid var(--border);border-radius:8px;padding:9px;
+  display:flex;align-items:center;gap:8px;min-width:0;
+}
+.learning-case-main{min-width:0;flex:1}
+.learning-case-title{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.learning-case-summary{font-size:12px;color:var(--muted);margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.learning-delete{flex:0 0 auto;min-width:50px;min-height:36px;padding:6px 9px;font-size:12px;background:#492323}
+.learning-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px}
+.learning-modal[hidden]{display:none!important}
+.learning-dialog{width:min(680px,100%);max-height:90dvh;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.learning-dialog h2{font-size:17px}
+.learning-source{font-size:13px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;background:var(--card2);padding:10px;border-radius:8px}
+#learning-corrected-text{width:100%;min-height:190px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+#learning-modal-message{font-size:12px;line-height:1.5;color:var(--muted)}
+
 </style>
 </head>
 <body>
@@ -268,6 +298,23 @@ tr.risk-unknown td:last-child { color: var(--muted); }
       <button onclick="doPreview(true, true)">🤖 AI解析</button>
       <button onclick="onCopy()">复制</button>
       <button class="danger" onclick="onClearInput()">清空</button>
+    </div>
+    <div id="learning-panel">
+      <div class="learning-title">🧠 AI 自我迭代 · 本地学习库</div>
+      <div class="learning-help">先核对结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容只记录为待处理样本。</div>
+      <div id="learning-stats">正在加载学习库…</div>
+      <div class="learning-btn-row">
+        <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
+        <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
+        <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
+      </div>
+      <div class="learning-btn-row">
+        <button onclick="toggleLearningRecent()">查看最近案例</button>
+        <button onclick="exportLearningData()">导出学习库</button>
+        <button onclick="document.getElementById('learning-import-file').click()">导入备份</button>
+        <input id="learning-import-file" type="file" accept=".json,application/json" style="display:none" onchange="importLearningFile(this)">
+      </div>
+      <div id="learning-recent" hidden></div>
     </div>
     <div id="totals"></div>
 
@@ -327,6 +374,21 @@ tr.risk-unknown td:last-child { color: var(--muted); }
   </section>
 </main>
 
+<div id="learning-modal" class="learning-modal" hidden>
+  <div class="learning-dialog" role="dialog" aria-modal="true" aria-labelledby="learning-modal-title">
+    <h2 id="learning-modal-title">纠错并保存学习案例</h2>
+    <div style="font-size:13px">原始下注文字：</div>
+    <div id="learning-source-text" class="learning-source"></div>
+    <label for="learning-corrected-text" style="font-size:13px">正确的标准解析文本</label>
+    <textarea id="learning-corrected-text" spellcheck="false" placeholder="例如：三中三 45-05-22各组10"></textarea>
+    <div id="learning-modal-message">请修正后再保存。</div>
+    <div class="btn-row">
+      <button onclick="closeCorrectionEditor()">取消</button>
+      <button id="learning-save-correction" class="primary" onclick="saveCorrectionCase()">校验并保存案例</button>
+    </div>
+  </div>
+</div>
+
 <nav class="tabbar">
   <button data-tab="input" class="active" onclick="switchTab('input')">输入</button>
   <button data-tab="summary" onclick="switchTab('summary')">汇总</button>
@@ -336,6 +398,7 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 </nav>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
+<script src="learning.js?v=1"></script>
 </body>
 </html>
