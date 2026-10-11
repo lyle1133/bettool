@@ -279,6 +279,16 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
         <button class="primary" id="btn-add" onclick="onAdd()">核对后添加</button>
         <button class="secondary" id="btn-copy" onclick="onCopy()">复制解析</button>
       </div>
+      <div class="learning-feedback" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div class="section-title">
+          <div><h3>AI 学习反馈</h3><p>识别有误时纠正并记住；完全正确时确认案例。</p></div>
+        </div>
+        <div class="learning-btn-row">
+          <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
+          <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
+          <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
+        </div>
+      </div>
     </section>
 
     <details id="learning-details" class="disclosure">
@@ -290,11 +300,7 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
         <div class="learning-title">AI 自我迭代 · 学习库</div>
         <div class="learning-help">先核对解析结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容单独记录为待处理样本。</div>
         <div id="learning-stats">正在加载学习库…</div>
-        <div class="learning-btn-row">
-          <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
-          <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
-          <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
-        </div>
+
         <div class="sync-config">
           <strong>🌐 私人云端学习库同步</strong>
           <p class="field-help">同一把专用同步密钥只需在自己的每台设备上配置一次。不要公开分享。</p>
