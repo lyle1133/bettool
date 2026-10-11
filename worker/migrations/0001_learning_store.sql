@@ -9,6 +9,6 @@ INSERT OR IGNORE INTO learning_store (id, revision, store_json, updated_at)
 VALUES (
   1,
   0,
-  '{"version":1,"cases":[],"unresolved":[],"metrics":{"confirmed":0,"corrected":0,"markedUnresolved":0,"exactHits":0,"retrievals":0}}',
+  '{"version":1,"cases":[],"unresolved":[],"deleted":[],"metrics":{"confirmed":0,"corrected":0,"markedUnresolved":0,"exactHits":0,"retrievals":0}}',
   CURRENT_TIMESTAMP
 );
