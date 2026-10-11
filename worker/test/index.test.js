@@ -93,6 +93,7 @@ test("authorized client can save a validated learning snapshot", async () => {
   assert.equal(body.revision, 1);
   assert.equal(body.store.cases.length, 1);
   assert.equal(body.store.cases[0].raw_text, "三中三 45-05-22各组10");
+  assert.deepEqual(body.store.deleted, [], "empty deletion list should be preserved");
 });
 
 test("stale revision gets 409 and does not overwrite a newer snapshot", async () => {
