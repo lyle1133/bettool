@@ -2,7 +2,7 @@ name: Parser regression checks
 
 on:
   push:
-    branches: [ai-parser-v6]
+    branches: [main, ai-parser-v6, ai-self-learning-v1]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -21,6 +21,9 @@ jobs:
       - name: Check Python syntax
         run: python -m py_compile core.py
       - name: Check JavaScript syntax
-        run: node --check app.js
+        run: |
+          node --check app.js
+          node --check learning.js
+          node tests/test_learning_logic.js
       - name: Run parser regression tests
         run: python -m unittest discover -s tests -v
