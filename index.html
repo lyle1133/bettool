@@ -290,6 +290,11 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
         <div class="learning-title">AI 自我迭代 · 学习库</div>
         <div class="learning-help">先核对解析结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容单独记录为待处理样本。</div>
         <div id="learning-stats">正在加载学习库…</div>
+        <div class="learning-btn-row">
+          <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
+          <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
+          <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
+        </div>
         <div class="sync-config">
           <strong>🌐 私人云端学习库同步</strong>
           <p class="field-help">同一把专用同步密钥只需在自己的每台设备上配置一次。不要公开分享。</p>
@@ -304,11 +309,7 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
           <div id="learning-sync-status" role="status" aria-live="polite">云端同步未配置，当前只保存在本地浏览器。</div>
           <div class="sync-help">首次迁移前先导出学习库备份。同步会合并本地与云端案例；同步成功后可在自己的其他设备读取。</div>
         </div>
-        <div class="learning-btn-row">
-          <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
-          <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
-          <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
-        </div>
+
         <div class="learning-btn-row">
           <button class="secondary" onclick="toggleLearningRecent()">查看最近案例</button>
           <button class="secondary" onclick="exportLearningData()">导出学习库</button>
