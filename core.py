@@ -1808,8 +1808,9 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
     special_play_types = {"特码总单", "特肖", "各肖", "波色"}
     n_to_z = build_number_to_zodiac(year_animal)
 
-    header = ["地区", "假设特码", "生肖", "波色", "尾数", "统计下注额", "中奖本金",
-              "预计赔付", "回水", "预计盈亏", "命中玩法", "风险等级"]
+    # Risk dashboard puts outcome estimates before the descriptive color/tail fields.
+    header = ["地区", "假设特码", "生肖", "预计盈亏", "预计赔付", "统计下注额",
+              "中奖本金", "回水", "波色", "尾数", "命中玩法", "风险等级"]
     rows: List[List[object]] = [header]
 
     regions: List[str] = []
@@ -1818,7 +1819,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
         if region not in regions:
             regions.append(region)
     if not regions:
-        return rows + [["", "", "", "", "", 0, 0, 0, 0, 0, "暂无记录", ""]]
+        return rows + [["", "", "", "", 0, 0, 0, 0, "", "", "暂无记录", ""]]
 
     all_data: List[Tuple[float, List[object]]] = []
     for region in regions:
@@ -1867,10 +1868,10 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
             hit_text = "、".join(sorted(set(hit_plays),
                                      key=lambda x: order.index(x) if x in order else 99)) or "无"
 
-            row = [region, fmt_code(n), n_to_z.get(n, ""), NUMBER_TO_COLOR.get(n, ""),
-                   str(n % 10) + "尾", base_amount, win_stake,
+            row = [region, fmt_code(n), n_to_z.get(n, ""), final_profit,
                    "待填赔率" if unresolved else payout_total,
-                   total_rebate, final_profit, hit_text, risk_level]
+                   base_amount, win_stake, total_rebate,
+                   NUMBER_TO_COLOR.get(n, ""), str(n % 10) + "尾", hit_text, risk_level]
             all_data.append((sort_profit, row))
 
     all_data.sort(key=lambda item: -item[0])
@@ -1879,7 +1880,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
         max_p = max(profits); min_p = min(profits); avg_p = sum(profits) / len(profits)
         rows.append([
             "[统计]", f"最大:{fmt_num(max_p)}", f"最小:{fmt_num(min_p)}",
-            "---", "---", "", "", "", "", f"平均:{fmt_num(avg_p)}", "---", "---",
+            f"平均:{fmt_num(avg_p)}", "---", "", "", "", "---", "---", "---", "---",
         ])
 
     for _, row in all_data:
