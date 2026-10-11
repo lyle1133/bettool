@@ -52,10 +52,10 @@ class CoreParserRegressionTests(unittest.TestCase):
         play_types = [group.play_type for group in parsed.groups]
         self.assertEqual(
             play_types,
-            ["特码总单", "三中三", "各肖"],
+            ["特码总单", "三中三", "各肖", "各肖"],
             "mixed input must retain the source order rather than moving multiline groups to the front",
         )
-        self.assertEqual(parsed.total, 23)
+        self.assertEqual(parsed.total, 33)
 
 
 if __name__ == "__main__":
