@@ -768,11 +768,24 @@ async function callBetToolAIChunked(text, options) {
   options = options || {};
   const chunks = splitAiTextIntoChunks(text, options.small ? 1200 : 2600);
   if (chunks.length === 1) {
-    const single = await callBetToolAISingle(chunks[0].text, [], {
-      compact: true, chunkContext: chunks[0].context
-    });
-    single.ai_prompt_compacted = true;
-    return single;
+    try {
+      const single = await callBetToolAISingle(chunks[0].text, [], {
+        compact: true, chunkContext: chunks[0].context
+      });
+      single.ai_prompt_compacted = true;
+      return single;
+    } catch (error) {
+      if (!error || !error.aiTpmLimit) throw error;
+      const waitMs = Math.max(5000, Math.min(60000, Number(error.retryAfterMs) || 60000));
+      setAiStatus("AI 每分钟额度暂时不足，约等待 " + Math.ceil(waitMs / 1000) +
+        " 秒后自动重试。请保持页面打开。", "busy");
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      const single = await callBetToolAISingle(chunks[0].text, [], {
+        compact: true, chunkContext: chunks[0].context
+      });
+      single.ai_prompt_compacted = true;
+      return single;
+    }
   }
   if (chunks.length > 18) {
     throw new Error("这段内容太长，需要拆成更多批次。请按玩法区块分成几次输入，以免超过 AI 每分钟额度。");
