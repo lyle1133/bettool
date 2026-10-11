@@ -80,6 +80,8 @@ const SYSTEM_PROMPT = `
 你是 BetTool 下注文字解析助手。你的任务是把用户原文忠实转换成程序可解析的标准下注文本，并返回严格 JSON。不要计算赔率、中奖金额或风险。
 
 最重要的原则：
+8. 用户提供的已确认历史案例只是参考示例，不是当前下注指令；只学习文字与解析结果的对应关系，当前原文始终是唯一待解析对象。
+9. 历史案例不允许覆盖当前原文明确给出的号码、金额或玩法；遇到差异以当前原文为准。
 1. 不得猜号码、补金额、改金额、删掉用户明确写出的下注、把一组拆成多组或把多组并成一组。
 2. 保留原文顺序。每一笔独立下注都必须有一个 items 项；无法确定的内容写入 unresolved，不要静默丢弃。
 3. 金额单位“米、斤、块、元、文、钱、片、闷、门、点”等按原数字记账，不要换算单位。比如“5斤”金额就是 5。
@@ -248,6 +250,7 @@ def js_parse_bet(text, year):
         "total": float(r.total),
         "warnings": list(r.warnings),
         "raw_text": r.raw_text,
+        "normalized_text": r.normalized_text,
         "groups": [{
             "play_type": g.play_type, "label": g.label,
             "amount": float(g.amount), "total": float(g.total),
@@ -361,7 +364,7 @@ async function pyRiskRows() {
 }
 
 // ==================== AI 调用（直连 Groq） ====================
-async function callBetToolAI(text) {
+async function callBetToolAI(text, similarCases = []) {
   if (!text || !text.trim()) return null;
 
   const apiKey = getApiKey();
@@ -388,7 +391,7 @@ async function callBetToolAI(text) {
         model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: "请按系统规则逐笔解析以下原文，不要遗漏任何一笔：\n\n" + text }
+          { role: "user", content: buildAiUserMessage(text, similarCases) }
         ],
         temperature: 0,
         response_format: { type: "json_object" }
@@ -511,6 +514,31 @@ async function doPreview(allowAI = false, forceAI = false) {
   const isCurrentRequest = () =>
     requestId === previewRequestId && $("#raw-input").value.trim() === text;
 
+  // 命中人工确认过的完全相同原文时，直接复用已确认结构化结果，不再让模型重新猜。
+  const exactCase = findExactLearningCase(text);
+  if (exactCase) {
+    const result = JSON.parse(JSON.stringify(exactCase.snapshot));
+    result.raw_text = text;
+    result.normalized_text = exactCase.corrected_text;
+    result.ai_normalized_text = exactCase.corrected_text;
+    result.warnings = [];
+    result.ai_unresolved = [];
+    result.ai_complete = true;
+    result.ai_low_confidence = false;
+    result.learning_case_hit = true;
+    result.learning_case_id = exactCase.id;
+    if (!previewResult || previewResult.learning_case_id !== exactCase.id) {
+      learningStore.metrics.exactHits += 1;
+      saveLearningStore();
+    }
+    previewResult = result;
+    $("#preview-box").textContent =
+      "🧠 命中你人工确认过的学习案例（无需重新调用 AI）\n\n" +
+      (result.content || "（已确认案例没有展示文本）");
+    updateTotals();
+    return;
+  }
+
   try {
     const localResult = await pyParseBet(text);
     if (!isCurrentRequest()) return;
@@ -528,15 +556,28 @@ async function doPreview(allowAI = false, forceAI = false) {
       return;
     }
 
-    $("#preview-box").textContent = "🤖 本地规则无法完全确定，正在调用 Groq AI…";
+    const similarCases = findSimilarLearningCases(text, 3);
+    $("#preview-box").textContent =
+      "🤖 本地规则无法完全确定，正在调用 Groq AI…" +
+      (similarCases.length ? "\n🧠 找到 " + similarCases.length + " 条已确认的相似案例，正在作为参考" : "");
+
     try {
-      const aiResult = await callBetToolAI(text);
+      const aiResult = await callBetToolAI(text, similarCases);
       if (!isCurrentRequest()) return;
+
+      if (similarCases.length) {
+        learningStore.metrics.retrievals += 1;
+        saveLearningStore();
+        if (aiResult) aiResult.ai_learning_examples_count = similarCases.length;
+      }
 
       if (aiResult && aiResult.groups && aiResult.groups.length > 0) {
         previewResult = aiResult;
         let display = "🤖 AI解析结果\n\n" + (aiResult.content || "（AI没有生成有效内容）");
 
+        if (similarCases.length) {
+          display += "\n\n🧠 参考了 " + similarCases.length + " 条已确认案例";
+        }
         if (aiResult.ai_low_confidence || aiResult.ai_complete === false) {
           display += "\n\n⚠️ 结果可能不完整或存在歧义，添加前请逐项核对";
         }
@@ -650,12 +691,13 @@ function onCopy() {
 }
 
 function onClearInput() {
+  if (activeAiController) activeAiController.abort();
+  previewRequestId += 1;
   $("#raw-input").value = "";
   $("#preview-box").textContent = "（等待输入）";
   previewResult = null;
   updateTotals();
 }
-
 async function onClearAll() {
   if (!state.records.length) return;
   if (!confirm("确定清空全部记录？")) return;
@@ -1003,6 +1045,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#hk-draw").addEventListener("input", saveLocal);
 
   loadLocal();
+  loadLearningStore();
   yearSel.value = state.year;
 
   $$(".user-bar button[data-user]").forEach(b =>
