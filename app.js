@@ -71,80 +71,63 @@ function maskKey(key) {
 const AI_MIN_CONFIDENCE = 0.75;
 const AI_AUTO_FALLBACK = true;
 let aiBusy = false;
+let activeAiController = null;
 let aiTimer = null;
+let previewRequestId = 0;
 
 // ==================== AI System Prompt ====================
 const SYSTEM_PROMPT = `
-你是 BetTool 下注文字解析助手。
+你是 BetTool 下注文字解析助手。你的任务是把用户原文忠实转换成程序可解析的标准下注文本，并返回严格 JSON。不要计算赔率、中奖金额或风险。
 
-你的唯一任务：
-把用户输入的中文下注文字，准确转换成 BetTool 可以继续解析的“标准下注文本”。
+最重要的原则：
+1. 不得猜号码、补金额、改金额、删掉用户明确写出的下注、把一组拆成多组或把多组并成一组。
+2. 保留原文顺序。每一笔独立下注都必须有一个 items 项；无法确定的内容写入 unresolved，不要静默丢弃。
+3. 金额单位“米、斤、块、元、文、钱、片、闷、门、点”等按原数字记账，不要换算单位。比如“5斤”金额就是 5。
+4. 号码必须在 01-49；保留号码前导零。不要把金额数字当作号码。
+5. 只有原文明确支持的玩法才能使用。词义不清、金额不清、玩法不清时，必须标为 unresolved。
+6. normalized_text 必须与 items[].normalized 的内容和顺序一致；若某一笔无法可靠标准化，不要从 normalized_text 中悄悄删去，而应在 unresolved 解释。
+7. 置信度不是事实。存在歧义时，即使生成了候选格式，confidence 也应低于 0.75 并写出 warning。
 
-不要计算中奖金额。
-不要计算赔率。
-不要修改下注金额。
-不要自行增加号码。
-不要猜测用户没有明确说出的号码。
+支持玩法和标准格式：
+A. 普通号码单注：不要添加“特码总单”前缀。
+   原文“17 29 41 每个3块” -> “17 29 41各3”
+B. 特肖/各肖：例如“猴30米” -> “猴各30”；“鸡狗各肖10” -> “鸡狗各10”
+C. 平特一肖：例如“平特鸡200块” -> “平特一肖：鸡 200”
+D. 连肖：必须使用阿拉伯数字 2/3/4/5，例如“四连虎鸡牛狗10块” -> “4连肖：虎鸡牛狗 10”
+E. 五不中/六不中/七不中：例如“04.06.05.11.12 五不中 200文” -> “04 06 05 11 12 五不中 200”
+F. 二中二/三中三：
+   - 若原文明确列出具体组合并使用“各组/每组”，每一组三个号码（或二中二的两个号码）必须原样保留，金额是每组金额。每个组合可单独输出一项，例如“45-05-22各组10” -> “三中三 45-05-22各组10”。
+   - 若原文是多行区块，必须保留所有组合行和每组金额；例如“三中三\n45-05-22\n23-26-17各组10”可输出为两个独立项：“三中三 45-05-22各组10”和“三中三 23-26-17各组10”。
+   - 若原文明确说复式/复试，并给出一组号码和金额，可按号码选择玩法输出，例如“三中三复式 01 02 03 04 各2” -> “三中三 01 02 03 04各2”。
+   - 不要把“列出的具体组合”误判为“从所有号码自动组合”；含义不确定时放入 unresolved。
+G. 波色、单双大小、平特尾按原文类别和金额标准化。
 
-支持的玩法：
-1. 特码（即纯号码下注）
-2. 特肖
-3. 各肖
-4. 平特一肖（简称“平特”、“平特肖”）
-5. 平特尾
-6. 波色
-7. 二连肖 / 三连肖 / 四连肖 / 五连肖
-8. 二中二 / 三中三
-9. 五不中 / 六不中 / 七不中
-
-号码范围只能是 01-49。
-
-【标准化格式规则 —— 必须严格遵守】
-
-规则 1：纯号码下注，不要写“特码总单”前缀！
-  输入：“17 29 41 15 27 33 21 45 04 28 40 每个3块”
-  正确输出：“17 29 41 15 27 33 21 45 04 28 40各3”
-  错误输出：“特码总单：17 29 41 ...各3”
-
-规则 2：连肖玩法必须用阿拉伯数字 2/3/4/5，且必须带金额。
-  输入：“四连虎鸡牛狗10块”
-  正确输出：“4连肖：虎鸡牛狗 10”
-  错误输出：“四连肖：虎鸡牛狗”      （没金额）
-  错误输出：“四连肖：虎鸡牛狗 10”   （用了中文“四”）
-
-规则 3：平特一肖必须写成“平特一肖：生肖 金额”。
-  输入：“平特鸡200块”
-  正确输出：“平特一肖：鸡 200”
-
-规则 4：五不中必须写成“号码 五不中 金额”。
-  输入：“五不中:04.06.05.11.12, 200文”
-  正确输出：“04 06 05 11 12 五不中 200”
-
-规则 5：如果原始输入有多个下注（多行或空格分隔），normalized_text 里要逐条输出，每行一条。
-  每条都必须包含玩法和金额，绝对不允许某行缺金额。
-
-规则 6：normalized_text 和 items 里的 normalized 字段必须完全一致。如果某个 item 无法确定金额，就不要放进 items，放进 unresolved。
-
-【标准格式示例】
-输入：“平特鸡200块 四连虎鸡牛狗10块
-17 29 41 15 27 33 21 45 04 28 40 每个3块
-24 12 48 36 44 32 42 30 39 20 18 30 42每个5块”
-
-正确输出：
+返回对象必须包含这些字段：
 {
   "success": true,
-  "normalized_text": "平特一肖：鸡 200\n4连肖：虎鸡牛狗 10\n17 29 41 15 27 33 21 45 04 28 40各3\n24 12 48 36 44 32 42 30 39 20 18 30 42各5",
+  "normalized_text": "逐笔标准化文本，以换行分隔",
   "items": [
-    {"raw":"平特鸡200块","normalized":"平特一肖：鸡 200","play_type":"平特一肖","numbers":[],"zodiacs":["鸡"],"amount":200,"confidence":0.99},
-    {"raw":"四连虎鸡牛狗10块","normalized":"4连肖：虎鸡牛狗 10","play_type":"4连肖","numbers":[],"zodiacs":["虎","鸡","牛","狗"],"amount":10,"confidence":0.99},
-    {"raw":"17 29 41 ...每个3块","normalized":"17 29 41 15 27 33 21 45 04 28 40各3","play_type":"特码","numbers":[17,29,41,15,27,33,21,45,4,28,40],"zodiacs":[],"amount":3,"confidence":0.99},
-    {"raw":"24 12 48 ...每个5块","normalized":"24 12 48 36 44 32 42 30 39 20 18 30 42各5","play_type":"特码","numbers":[24,12,48,36,44,32,42,30,39,20,18,30,42],"zodiacs":[],"amount":5,"confidence":0.99}
+    {
+      "raw": "对应的原始下注片段",
+      "normalized": "一笔下注的标准化文本",
+      "play_type": "特码/特肖/各肖/平特一肖/二中二/三中三/五不中等",
+      "numbers": [1, 2, 3],
+      "zodiacs": ["鸡"],
+      "amount": 10,
+      "confidence": 0.95
+    }
   ],
   "unresolved": [],
   "warnings": []
 }
 
-必须返回严格 JSON，不要输出 Markdown，不要输出解释。
+要求：
+- items 中每一项的 normalized 必须非空，并且 amount 必须是原文中实际写出的正数；无法从原文确定时不要编造。
+- 普通号码行里的 numbers 只填号码；生肖玩法的 zodiacs 填生肖。
+- 同一笔里重复出现的号码不得自行改写原文；若程序标准化必须去重，应在 warnings 中说明。
+- normalized_text 必须按 items 顺序逐行组合；若有未能解析的原文，完整列出 unresolved。
+- 只返回合法 JSON，不要 Markdown，不要代码围栏，不要输出额外解释。
+
 `;
 
 // ==================== 状态 ====================
@@ -385,73 +368,101 @@ async function callBetToolAI(text) {
   if (!apiKey || !apiKey.startsWith("gsk_")) {
     throw new Error("请先在「设置」页填入你的 Groq API Key");
   }
-
-  if (aiBusy) return null;
+  // 新输入到来时取消旧请求，避免旧结果占用 AI 请求锁或覆盖新预览。
+  if (activeAiController) activeAiController.abort();
   aiBusy = true;
   setStatus("🤖 AI正在解析…");
+  const controller = new AbortController();
+  activeAiController = controller;
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
+        "Authorization": "Bearer " + apiKey
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: "请解析下面的下注文字：\n\n" + text }
+          { role: "user", content: "请按系统规则逐笔解析以下原文，不要遗漏任何一笔：\n\n" + text }
         ],
-        temperature: 0.1,
+        temperature: 0,
         response_format: { type: "json_object" }
       })
     });
 
     const responseText = await response.text();
-
     if (!response.ok) {
-      throw new Error(`Groq API ${response.status}: ${responseText.slice(0, 1000)}`);
+      throw new Error("Groq API " + response.status + ": " + responseText.slice(0, 800));
     }
 
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (e) {
-      throw new Error("Groq 返回的数据不是有效 JSON");
+      throw new Error("Groq API 响应不是有效 JSON");
     }
 
-    const textOutput = data?.choices?.[0]?.message?.content?.trim();
-    if (!textOutput) {
-      throw new Error("Groq 没有返回有效解析结果");
-    }
+    const textOutput = data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content
+      ? data.choices[0].message.content.trim() : "";
+    if (!textOutput) throw new Error("Groq 没有返回有效解析结果");
 
     let ai;
     try {
       ai = JSON.parse(textOutput);
     } catch (e) {
-      throw new Error("Groq 返回内容无法解析为 JSON：" + textOutput.slice(0, 1000));
+      const first = textOutput.indexOf("{");
+      const last = textOutput.lastIndexOf("}");
+      if (first < 0 || last <= first) {
+        throw new Error("Groq 返回内容无法解析为 JSON：" + textOutput.slice(0, 500));
+      }
+      try {
+        ai = JSON.parse(textOutput.slice(first, last + 1));
+      } catch (_) {
+        throw new Error("Groq 返回的 JSON 格式不完整：" + textOutput.slice(0, 500));
+      }
+    }
+
+    if (!ai || typeof ai !== "object" || Array.isArray(ai)) {
+      throw new Error("AI结果格式错误：最外层必须是 JSON 对象");
     }
 
     const items = Array.isArray(ai.items) ? ai.items : [];
-    const lowConfidence = items.some(
-      item => Number(item.confidence || 0) < AI_MIN_CONFIDENCE
+    const lowConfidence = items.length === 0 || items.some(
+      item => !item || Number(item.confidence || 0) < AI_MIN_CONFIDENCE
     );
 
     const parsed = await pyParseAIResult(ai);
     parsed.ai = true;
     parsed.ai_raw = ai;
     parsed.ai_low_confidence = lowConfidence;
-    parsed.ai_normalized_text = ai.normalized_text || "";
+    parsed.ai_normalized_text = String(ai.normalized_text || "");
+    parsed.ai_unresolved = Array.isArray(parsed.unresolved)
+      ? parsed.unresolved
+      : (Array.isArray(ai.unresolved) ? ai.unresolved : []);
+    parsed.ai_complete = parsed.ai_complete === true &&
+      !lowConfidence && parsed.ai_unresolved.length === 0;
     parsed.raw_text = text;
-
     return parsed;
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error("AI请求超时（45秒），请稍后重试");
+    }
+    throw error;
   } finally {
-    aiBusy = false;
-    setStatus("🟢 本地解析 + AI");
+    clearTimeout(timeoutId);
+    if (activeAiController === controller) {
+      activeAiController = null;
+      aiBusy = false;
+      setStatus("🟢 本地解析 + AI");
+    }
   }
 }
-
 // ==================== 用户 & 筛选 ====================
 function switchUser(u) {
   state.currentUser = u;
@@ -486,6 +497,7 @@ function isSevereWarning(w) {
 }
 
 async function doPreview(allowAI = false, forceAI = false) {
+  const requestId = ++previewRequestId;
   if (!coreReady) return;
 
   const text = $("#raw-input").value.trim();
@@ -496,15 +508,18 @@ async function doPreview(allowAI = false, forceAI = false) {
     return;
   }
 
+  const isCurrentRequest = () =>
+    requestId === previewRequestId && $("#raw-input").value.trim() === text;
+
   try {
     const localResult = await pyParseBet(text);
-    previewResult = localResult;
+    if (!isCurrentRequest()) return;
 
+    previewResult = localResult;
     const groups = Array.isArray(localResult.groups) ? localResult.groups : [];
     const warnings = Array.isArray(localResult.warnings) ? localResult.warnings : [];
     const localEmpty = groups.length === 0;
     const severe = warnings.some(isSevereWarning);
-
     const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || localEmpty || severe);
 
     if (!needAI) {
@@ -514,43 +529,45 @@ async function doPreview(allowAI = false, forceAI = false) {
     }
 
     $("#preview-box").textContent = "🤖 本地规则无法完全确定，正在调用 Groq AI…";
-
     try {
       const aiResult = await callBetToolAI(text);
+      if (!isCurrentRequest()) return;
 
       if (aiResult && aiResult.groups && aiResult.groups.length > 0) {
         previewResult = aiResult;
+        let display = "🤖 AI解析结果\n\n" + (aiResult.content || "（AI没有生成有效内容）");
 
-        let display = "🤖 AI解析结果\n\n" +
-          (aiResult.content || "（AI没有生成有效内容）");
-
-        if (aiResult.ai_low_confidence) {
-          display += "\n\n⚠️ AI置信度较低，请人工确认";
+        if (aiResult.ai_low_confidence || aiResult.ai_complete === false) {
+          display += "\n\n⚠️ 结果可能不完整或存在歧义，添加前请逐项核对";
         }
-
         if (aiResult.warnings && aiResult.warnings.length) {
-          display += "\n\n⚠️ 提示：\n" + aiResult.warnings.join("\n");
+          display += "\n\n⚠️ 解析提示：\n" + aiResult.warnings.join("\n");
         }
-
+        if (aiResult.ai_unresolved && aiResult.ai_unresolved.length) {
+          display += "\n\n❓ 未能确定的原文：\n" + aiResult.ai_unresolved.map(x =>
+            typeof x === "string" ? x : JSON.stringify(x)
+          ).join("\n");
+        }
         $("#preview-box").textContent = display;
       } else {
         previewResult = localResult;
         $("#preview-box").textContent =
-          (localResult.content || "（AI也无法确定）") + "\n\n⚠️ 建议人工检查";
+          (localResult.content || "（AI也无法确定）") + "\n\n⚠️ AI未能生成可用解析，请检查原文或手动拆分";
       }
     } catch (aiError) {
+      if (!isCurrentRequest()) return;
       previewResult = localResult;
       $("#preview-box").textContent =
         (localResult.content || "（本地解析无有效结果）") +
         "\n\n⚠️ AI解析失败：" + aiError.message;
     }
-
   } catch (error) {
+    if (!isCurrentRequest()) return;
     previewResult = null;
     $("#preview-box").textContent = "解析错误：" + error.message;
   }
 
-  updateTotals();
+  if (isCurrentRequest()) updateTotals();
 }
 
 function updateTotals() {
@@ -571,10 +588,38 @@ async function onPaste() {
 }
 
 async function onAdd() {
-  if (!previewResult?.groups?.length) { toast("没有识别到有效内容"); return; }
+  if (!previewResult || !previewResult.groups || !previewResult.groups.length) {
+    toast("没有识别到有效内容");
+    return;
+  }
+
+  const currentText = $("#raw-input").value.trim();
+  const parsedText = String(previewResult.raw_text || "").trim();
+  if (!currentText || parsedText !== currentText) {
+    toast("当前输入内容还未完成解析，请等待预览更新后再添加", 2800);
+    doPreview(false);
+    return;
+  }
+
+  const warnings = Array.isArray(previewResult.warnings) ? previewResult.warnings : [];
+  const unresolved = Array.isArray(previewResult.ai_unresolved) ? previewResult.ai_unresolved : [];
+  const incomplete = previewResult.ai_complete === false;
+  const lowConfidence = previewResult.ai_low_confidence === true;
+  if (warnings.length || unresolved.length || incomplete || lowConfidence) {
+    const details = warnings.slice(0, 4).concat(
+      unresolved.slice(0, 3).map(x => typeof x === "string" ? x : JSON.stringify(x))
+    );
+    const reason = details.length ? "\n\n提示：\n" + details.join("\n") : "";
+    if (!confirm("解析结果带有提示或未完全确认内容。请先核对每一笔的玩法、号码和金额。\n\n仍然添加当前预览吗？" + reason)) {
+      return;
+    }
+  }
+
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
-  const ts = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const ts = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" +
+    pad(now.getDate()) + " " + pad(now.getHours()) + ":" +
+    pad(now.getMinutes()) + ":" + pad(now.getSeconds());
   const region = /香港|港彩|港/.test(previewResult.raw_text) ? "香港" : "澳门";
   const rec = {
     seq: state.records.length + 1,
@@ -583,20 +628,20 @@ async function onAdd() {
     amount: previewResult.total,
     created_at: ts,
     groups: previewResult.groups,
-    warnings: previewResult.warnings,
-    region,
-    user: state.currentUser,
+    warnings: warnings,
+    region: region,
+    user: state.currentUser
   };
   state.records.push(rec);
   $("#raw-input").value = "";
   $("#preview-box").textContent = "（等待输入）";
   previewResult = null;
+  previewRequestId += 1;
   updateTotals();
   renderRecords();
   saveLocal();
-  toast(`[${rec.user}] 已添加 #${rec.seq}: ${fmtNum(rec.amount)}`);
+  toast("[" + rec.user + "] 已添加 #" + rec.seq + ": " + fmtNum(rec.amount));
 }
-
 function onCopy() {
   if (!previewResult?.content) { toast("没有可复制内容"); return; }
   navigator.clipboard.writeText(previewResult.content)
