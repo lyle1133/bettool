@@ -2096,83 +2096,140 @@ def export_error_txt(path: str, records: Sequence[OrderRecord]) -> None:
     Path(path).write_text("\n".join(lines), encoding="utf-8-sig")
 
 # ============================================================
-# BetTool AI 解析支持
+# ============================================================
+# BetTool AI 解析支持（v6：严格校验、可追踪的部分成功）
 # ============================================================
 
 def normalize_ai_numbers(numbers):
-    """
-    清洗 AI 返回的号码。
-    """
+    """清洗 AI 号码；不把 1.5 之类的值静默截断为整数。"""
     result = []
     if not isinstance(numbers, list):
         return result
     for value in numbers:
-        try:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            n = value
+        elif isinstance(value, str) and re.fullmatch(r"\s*\d{1,2}\s*", value):
+            n = int(value.strip())
+        elif isinstance(value, float) and value.is_integer():
             n = int(value)
-        except Exception:
+        else:
             continue
         if 1 <= n <= 49 and n not in result:
             result.append(n)
     return result
 
 
+def _ai_text_list(value) -> List[str]:
+    """把模型返回的提示字段安全转换成字符串列表。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        value = [value]
+    result = []
+    for item in value:
+        text = item.strip() if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
 def validate_ai_result(ai_result):
     """
-    校验 Gemini 返回的数据。
-    AI 只负责理解文字，最终是否有效仍由 core.py 判断。
+    校验 AI 返回的数据。
+    AI 只做文字理解；金额、格式和最终汇总仍交给本地解析器。
+    任何被跳过/不完整的字段都会形成 warning，不能悄悄当成完整结果。
     """
     if not isinstance(ai_result, dict):
         return {
-            "success": False,
-            "error": "AI结果不是对象",
-            "items": [],
-            "warnings": []
+            "success": False, "error": "AI结果不是对象",
+            "items": [], "warnings": ["AI结果不是对象"], "unresolved": []
         }
 
     items = ai_result.get("items")
     if not isinstance(items, list):
         return {
-            "success": False,
-            "error": "AI没有返回items",
-            "items": [],
-            "warnings": []
+            "success": False, "error": "AI没有返回items",
+            "items": [], "warnings": ["AI没有返回有效的items列表"], "unresolved": _ai_text_list(ai_result.get("unresolved"))
         }
 
     valid_items = []
-    warnings = list(ai_result.get("warnings") or [])
+    warnings = _ai_text_list(ai_result.get("warnings"))
+    unresolved = _ai_text_list(ai_result.get("unresolved"))
 
-    for item in items:
+    if not items:
+        warnings.append("AI返回的items为空")
+
+    for index, item in enumerate(items, 1):
         if not isinstance(item, dict):
+            warnings.append(f"第{index}项不是对象，未能核验")
             continue
 
-        play_type = str(item.get("play_type") or "特码总单").strip()
+        raw_text = str(item.get("raw") or "").strip()
+        normalized = str(item.get("normalized") or "").strip()
+        play_type = str(item.get("play_type") or "").strip()
+
+        if not normalized:
+            warnings.append(f"第{index}项缺少标准化文本：{raw_text or '原文未提供'}")
+        if not play_type:
+            warnings.append(f"第{index}项缺少玩法名称：{raw_text or normalized or '原文未提供'}")
 
         amount_raw = item.get("amount")
         try:
             amount = float(amount_raw)
-        except Exception:
-            warnings.append(f"AI金额无法识别：{amount_raw}")
+        except (TypeError, ValueError, OverflowError):
+            warnings.append(f"第{index}项金额无法识别：{amount_raw}")
             continue
 
-        if amount <= 0:
-            warnings.append(f"AI金额必须大于0：{amount}")
+        if amount <= 0 or amount != amount or amount in (float("inf"), float("-inf")):
+            warnings.append(f"第{index}项金额必须是有限的正数：{amount_raw}")
             continue
 
-        numbers = normalize_ai_numbers(item.get("numbers"))
+        numbers_raw = item.get("numbers")
+        numbers = normalize_ai_numbers(numbers_raw)
+        if numbers_raw is not None and not isinstance(numbers_raw, list):
+            warnings.append(f"第{index}项号码字段格式不正确")
+        elif isinstance(numbers_raw, list):
+            invalid_numbers = [
+                str(v) for v in numbers_raw
+                if not (
+                    (isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 49)
+                    or (isinstance(v, float) and v.is_integer() and 1 <= v <= 49)
+                    or (isinstance(v, str) and re.fullmatch(r"\s*\d{1,2}\s*", v) and 1 <= int(v.strip()) <= 49)
+                )
+            ]
+            if invalid_numbers:
+                warnings.append(f"第{index}项包含无效号码：{', '.join(invalid_numbers)}")
 
         confidence = item.get("confidence", 0)
         try:
             confidence = float(confidence)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
+            confidence = 0.0
+        if confidence != confidence or confidence in (float("inf"), float("-inf")):
             confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
+        if confidence < 0.75:
+            warnings.append(f"第{index}项置信度较低（{confidence:.2f}），需要人工核对")
+
+        zodiacs_raw = item.get("zodiacs") or []
+        if isinstance(zodiacs_raw, str):
+            zodiacs = list(zodiacs_raw)
+        elif isinstance(zodiacs_raw, list):
+            zodiacs = [str(z).strip() for z in zodiacs_raw if str(z).strip()]
+        else:
+            zodiacs = []
+            warnings.append(f"第{index}项生肖字段格式不正确")
 
         valid_items.append({
-            "raw": str(item.get("raw") or ""),
-            "normalized": str(item.get("normalized") or ""),
-            "play_type": play_type,
+            "raw": raw_text,
+            "normalized": normalized,
+            "play_type": play_type or "未指定玩法",
             "numbers": numbers,
-            "zodiacs": list(item.get("zodiacs") or []),
+            "zodiacs": zodiacs,
             "amount": amount,
             "confidence": confidence,
         })
@@ -2180,15 +2237,17 @@ def validate_ai_result(ai_result):
     return {
         "success": bool(valid_items),
         "items": valid_items,
-        "warnings": warnings,
-        "unresolved": list(ai_result.get("unresolved") or [])
+        "warnings": _ai_text_list(warnings),
+        "unresolved": unresolved,
+        "source_item_count": len(items),
+        "valid_item_count": len(valid_items),
     }
 
 
 def parse_ai_normalized_text(normalized_text, year_animal="马"):
     """
-    AI 给出标准化文字以后，再重新交给原来的 parse_bet()。
-    AI：负责理解；core.py：负责最终解析和计算。
+    AI 输出标准化文字后，仍交给本地 parse_bet() 计算。
+    这里不信任 AI 给出的总额或组数。
     """
     if not normalized_text:
         return ParsedBet(
@@ -2199,10 +2258,7 @@ def parse_ai_normalized_text(normalized_text, year_animal="马"):
 
 
 def ai_result_to_preview(ai_result, year_animal="马"):
-    """
-    把 Gemini 返回结果转换成 BetTool 原来的 preview 数据结构。
-    前端可以直接继续使用。
-    """
+    """转换为原有 preview 结构，并显式暴露是否完整，防止部分结果被误当成成功。"""
     checked = validate_ai_result(ai_result)
 
     if not checked.get("success"):
@@ -2211,39 +2267,60 @@ def ai_result_to_preview(ai_result, year_animal="马"):
             "content": "",
             "total": 0.0,
             "warnings": checked.get("warnings", []),
-            "groups": []
+            "unresolved": checked.get("unresolved", []),
+            "ai_complete": False,
+            "groups": [],
         }
 
-        # 始终从 items 生成 normalized_text（比 AI 返回的更可靠）
     generated_lines = []
+    missing_normalized = False
     for item in checked["items"]:
         normalized = str(item.get("normalized") or "").strip()
         if normalized:
             generated_lines.append(normalized)
-    normalized_text = "\n".join(generated_lines)
+        else:
+            missing_normalized = True
 
-    # 如果 items 里没有内容，才回退用 AI 的 normalized_text
+    # 每笔 item 是首选来源。只有所有 item 均缺标准化文本时，才尝试 AI 的整体字段。
+    normalized_text = "\n".join(generated_lines)
     if not normalized_text:
         normalized_text = str(ai_result.get("normalized_text") or "").strip()
 
+    warnings = list(checked.get("warnings", []))
+    if missing_normalized:
+        warnings.append("至少一笔下注缺少标准化文本，当前预览可能不完整")
+
+    ai_normalized = str(ai_result.get("normalized_text") or "").strip()
+    if ai_normalized and normalized_text and ai_normalized != normalized_text:
+        warnings.append("AI整体normalized_text与items逐笔结果不一致，已优先采用items，请人工核对")
+
     parsed = parse_ai_normalized_text(normalized_text, year_animal)
+    warnings.extend(parsed.warnings)
+    warnings = _ai_text_list(warnings)
+    unresolved = checked.get("unresolved", [])
 
-    all_warnings = []
-    all_warnings.extend(checked.get("warnings", []))
-    all_warnings.extend(parsed.warnings)
-
-    unique_warnings = []
-    for warning in all_warnings:
-        if warning not in unique_warnings:
-            unique_warnings.append(warning)
+    valid_confidence = all(item.get("confidence", 0) >= 0.75 for item in checked["items"])
+    all_items_normalized = (
+        checked.get("source_item_count") == checked.get("valid_item_count")
+        and len(generated_lines) == len(checked["items"])
+    )
+    ai_complete = bool(
+        parsed.groups
+        and all_items_normalized
+        and valid_confidence
+        and not warnings
+        and not unresolved
+    )
 
     return {
         "success": bool(parsed.groups),
         "content": parsed.content,
         "total": float(parsed.total),
-        "warnings": unique_warnings,
+        "warnings": warnings,
         "raw_text": parsed.raw_text,
         "normalized_text": normalized_text,
+        "unresolved": unresolved,
+        "ai_complete": ai_complete,
         "groups": [
             {
                 "play_type": g.play_type,
