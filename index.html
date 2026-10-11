@@ -5,381 +5,369 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="押注统计">
+<meta name="apple-mobile-web-app-title" content="BetTool">
 <meta name="theme-color" content="#0e1014">
-<title>押注自动统计</title>
+<title>BetTool · 押注解析与统计</title>
 <style>
 :root{
-  --bg:#0e1014; --card:#171a21; --card2:#1f242e; --btn:#232833;
-  --accent:#3b8cf5; --text:#eef0f3; --muted:#8890a0;
-  --yellow:#ffd158; --green:#59d97a; --red:#f26666;
-  --border:#2a2f3a;
-  --safe-top:env(safe-area-inset-top,0px);
-  --safe-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:dark;
+  --bg:#0b0d12;--panel:#141821;--panel-raised:#1a202b;--panel-soft:#202735;
+  --accent:#4285f4;--accent-hover:#5895fb;--text:#f2f4f8;--muted:#a2aabb;
+  --subtle:#717c90;--border:#2a3241;--success:#55d99b;--warning:#ffd166;--danger:#ff7777;
+  --radius:16px;--radius-sm:11px;--shadow:0 14px 38px rgba(0,0,0,.16);
+  --safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{
-  height:100%;background:var(--bg);color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
-  font-size:16px;-webkit-text-size-adjust:100%;overflow:hidden;
-}
-body{
-  display:flex;flex-direction:column;height:100dvh;
-  padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);
-}
-header{
-  flex-shrink:0;padding:10px 12px;background:var(--card);
-  border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;gap:8px;
-}
-header h1{font-size:16px;font-weight:600}
-#status{font-size:12px;color:var(--muted);flex:1;text-align:right}
-main{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
-.tab{
-  flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:none;
-  flex-direction:column;gap:10px;padding:12px;
-  -webkit-overflow-scrolling:touch;
-}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:16px;-webkit-text-size-adjust:100%;overflow:hidden}
+body{display:flex;flex-direction:column;height:100dvh;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);background:radial-gradient(ellipse at 50% -20%,rgba(66,133,244,.10),transparent 48%),var(--bg)}
+button,input,textarea,select{font:inherit}
+button{border:1px solid transparent;cursor:pointer;min-height:44px;padding:11px 14px;border-radius:var(--radius-sm);font-size:14px;font-weight:650;color:var(--text);background:var(--panel-soft);transition:background .15s,border-color .15s,transform .15s}
+button:hover{border-color:#3c465a}
+button:active{transform:scale(.985)}
+button:disabled{opacity:.48;cursor:not-allowed;transform:none}
+button.primary{background:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent-hover)}
+button.secondary{background:transparent;border-color:var(--border)}
+button.danger{background:rgba(255,119,119,.10);border-color:rgba(255,119,119,.2);color:#ff9b9b}
+button.full{width:100%}
+header.app-header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(20,24,33,.94);border-bottom:1px solid var(--border);flex-shrink:0;min-height:66px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand-mark{display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;border-radius:12px;background:linear-gradient(145deg,#4285f4,#2458bf);font-weight:850;color:#fff;font-size:14px;box-shadow:0 7px 18px rgba(66,133,244,.22)}
+.brand-copy h1{font-size:16px;line-height:1.2;font-weight:780;letter-spacing:.2px}
+.brand-copy p{font-size:11px;color:var(--muted);margin-top:4px}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+#status{font-size:11px;color:var(--success);padding:6px 9px;border-radius:999px;background:rgba(85,217,155,.09);border:1px solid rgba(85,217,155,.18);white-space:nowrap}
+#year-select{max-width:138px;width:auto;min-height:36px;padding:6px 9px;background:var(--panel-raised);color:var(--text);border:1px solid var(--border);border-radius:9px;font-size:11px}
+main{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;align-items:stretch}
+.tab{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:none;flex-direction:column;gap:14px;padding:18px 16px 24px;width:min(100%,960px);align-self:center;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .tab.active{display:flex}
-#tab-input > * { flex-shrink: 0; }
-
-textarea,input[type=text],input[type=number],select{
-  width:100%;background:var(--card);border:1px solid var(--border);
-  color:var(--text);padding:14px 14px;border-radius:10px;font-size:16px;
-  font-family:inherit;resize:vertical;outline:none;
-  min-height:52px;line-height:1.4;
-}
-textarea:focus,input:focus{border-color:var(--accent)}
-select{padding:10px 12px;min-height:44px}
-
-#raw-input{ min-height:120px; font-size:16px; }
-#preview-box{
-  background:var(--card2);border-radius:10px;padding:14px;
-  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;
-  white-space:pre-wrap;min-height:60px;max-height:180px;overflow:auto;
-  line-height:1.5;
-}
-#ai-status{
-  background:var(--card2);border-radius:10px;padding:10px 12px;
-  color:var(--muted);font-size:13px;line-height:1.4;
-}
-
+.tab-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.tab-heading h2{font-size:22px;letter-spacing:-.35px;font-weight:800}
+.tab-heading p{font-size:13px;color:var(--muted);line-height:1.55;margin-top:5px}
+.card{background:linear-gradient(155deg,rgba(26,32,43,.98),rgba(20,24,33,.98));border:1px solid var(--border);border-radius:var(--radius);padding:15px;box-shadow:var(--shadow);min-width:0}
+.user-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:2px 0}
+.user-bar>span{font-size:12px;color:var(--muted);margin-right:2px}
+.user-bar button{flex:0 0 auto;min-width:40px;min-height:36px;padding:7px 11px;font-size:12px;background:var(--panel-raised);border-color:var(--border)}
+.user-bar button.active{background:rgba(66,133,244,.18);border-color:rgba(66,133,244,.7);color:#92bdff}
+.field-label{display:block;font-size:13px;font-weight:750;margin-bottom:8px}
+.field-help{font-size:12px;color:var(--muted);line-height:1.55}
+textarea,input[type=text],input[type=number],input[type=url],input[type=password],select{width:100%;background:#0f131b;border:1px solid #333c4d;color:var(--text);padding:13px 14px;border-radius:12px;font-size:15px;outline:none;min-height:46px;line-height:1.45}
+textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(66,133,244,.12)}
+#raw-input{min-height:148px;resize:vertical;font-size:15px;line-height:1.65}
+.input-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:11px;color:var(--subtle)}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
-button{
-  background:var(--btn);color:var(--text);border:none;
-  padding:14px 16px;border-radius:10px;font-size:16px;
-  font-family:inherit;cursor:pointer;flex:1;min-width:0;
-  white-space:nowrap;min-height:48px;
-  font-weight:500;
-}
-button:active{opacity:0.7}
-button.primary{background:var(--accent);font-weight:600}
-button.danger{background:#5a1e1e}
-
-#totals{font-size:14px;color:var(--yellow);padding:6px 2px;line-height:1.6}
-
-.user-bar{
-  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-  padding:4px 0;
-}
-.user-bar > span{
-  font-size:13px;color:var(--muted);margin-right:4px;flex-shrink:0;
-}
-.user-bar button{
-  flex:0 0 auto;min-width:44px;min-height:40px;
-  padding:8px 12px;font-size:14px;
-  background:var(--card);border:1px solid var(--border);
-}
-.user-bar button.active{
-  background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;
-}
-
-.records-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:4px 2px;
-}
-.records-header h3{font-size:14px;font-weight:600;color:var(--muted)}
-.records-header .count{
-  font-size:12px;color:var(--accent);font-weight:600;
-  background:rgba(59,140,245,0.12);
-  padding:2px 8px;border-radius:10px;
-}
-
-#records-list{
-  background:var(--card);border-radius:10px;
-  border:1px solid var(--border);
-}
-#records-list .rec-row{
-  display:flex;align-items:center;gap:8px;
-  padding:10px 12px;border-bottom:1px solid var(--border);
-  font-size:14px;
-}
+.btn-row button{flex:1;min-width:100px}
+.input-actions{margin-top:12px}
+.input-actions button{min-height:48px}
+.ai-status{display:flex;align-items:flex-start;gap:9px;margin-top:12px;padding:10px 12px;border-radius:11px;background:rgba(162,170,187,.07);border:1px solid rgba(162,170,187,.10);font-size:12px;color:var(--muted);line-height:1.55}
+.ai-status:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--subtle);margin-top:5px;flex:0 0 auto}
+.ai-status[data-state="busy"]{color:#a9caff;border-color:rgba(66,133,244,.24);background:rgba(66,133,244,.08)}
+.ai-status[data-state="busy"]:before{background:var(--accent);box-shadow:0 0 0 4px rgba(66,133,244,.13)}
+.ai-status[data-state="success"]{color:#a6edc8;border-color:rgba(85,217,155,.2);background:rgba(85,217,155,.06)}
+.ai-status[data-state="success"]:before{background:var(--success)}
+.ai-status[data-state="error"]{color:#ffc0c0;border-color:rgba(255,119,119,.2);background:rgba(255,119,119,.06)}
+.ai-status[data-state="error"]:before{background:var(--danger)}
+.section-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.section-title h3{font-size:16px;font-weight:780}
+.section-title p{margin-top:4px;font-size:12px;color:var(--muted);line-height:1.5}
+.badge{font-size:10px;font-weight:750;padding:5px 8px;border-radius:999px;color:var(--muted);background:var(--panel-soft);border:1px solid var(--border);white-space:nowrap}
+.badge.success{color:#9ce9c2;background:rgba(85,217,155,.08);border-color:rgba(85,217,155,.18)}
+.badge.warning{color:#ffe0a0;background:rgba(255,209,102,.08);border-color:rgba(255,209,102,.18)}
+.badge.danger{color:#ffb3b3;background:rgba(255,119,119,.08);border-color:rgba(255,119,119,.18)}
+.preview-box{display:flex;flex-direction:column;gap:10px;min-width:0}
+.preview-placeholder,.empty{text-align:center;color:var(--muted);padding:24px 14px;border:1px dashed var(--border);border-radius:12px;font-size:13px;line-height:1.6}
+.preview-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.preview-stat{padding:12px;border:1px solid var(--border);background:rgba(15,19,27,.64);border-radius:12px;min-width:0}
+.preview-stat span{display:block;font-size:11px;color:var(--muted)}
+.preview-stat strong{display:block;font-size:21px;line-height:1.35;margin-top:5px;overflow-wrap:anywhere}
+.preview-stat.total strong{color:var(--warning)}
+.parsed-group-list{display:flex;flex-direction:column;gap:8px}
+.parsed-group-card{border:1px solid var(--border);background:rgba(15,19,27,.64);border-radius:12px;padding:12px;min-width:0}
+.group-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.group-head strong{font-size:14px}
+.group-head span{font-size:10px;color:var(--muted)}
+.group-selection{font-size:14px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:9px;color:#e2e7f0}
+.group-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)}
+.group-meta div{min-width:0}
+.group-meta span{display:block;font-size:10px;color:var(--muted)}
+.group-meta strong{display:block;font-size:13px;margin-top:4px;overflow-wrap:anywhere}
+.standard-text{border-top:1px solid var(--border);padding-top:10px}
+.standard-text summary{cursor:pointer;color:#b4c8e8;font-size:12px;font-weight:700;list-style-position:inside}
+.standard-text pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;color:#d4dbea;background:#0b0e14;padding:12px;border-radius:10px;margin-top:8px}
+.preview-warnings{display:flex;flex-direction:column;gap:6px}
+.preview-warning{font-size:12px;line-height:1.55;color:#ffe1a5;background:rgba(255,209,102,.07);border:1px solid rgba(255,209,102,.16);padding:10px 11px;border-radius:10px;overflow-wrap:anywhere}
+.ai-error-card{padding:12px;border:1px solid rgba(255,119,119,.24);background:rgba(255,119,119,.06);border-radius:12px;display:flex;flex-direction:column;gap:8px}
+.ai-error-card strong{font-size:13px;color:#ffb6b6}
+.ai-error-card p{font-size:12px;line-height:1.6;color:#d5c7c7;overflow-wrap:anywhere}
+.ai-error-actions{display:flex;flex-wrap:wrap;gap:7px}
+.ai-error-actions button{font-size:12px;min-height:38px;padding:8px 10px}
+.ai-technical details{font-size:11px;color:var(--muted)}
+.ai-technical pre{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:7px;color:#b8c1cf;font-size:11px;line-height:1.45}
+.totals{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px;background:rgba(66,133,244,.07);border:1px solid rgba(66,133,244,.16);border-radius:12px;margin-top:10px}
+.totals span{display:flex;gap:7px;align-items:center;font-size:11px;color:var(--muted)}
+.totals strong{font-size:16px;color:var(--text)}
+.totals .preview-total strong{color:var(--warning)}
+.preview-actions{margin-top:10px}
+.preview-actions button{min-height:46px}
+.panel-heading{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.panel-heading h3{font-size:15px}
+.panel-heading p{font-size:12px;color:var(--muted);margin-top:4px}
+.records-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.records-header h3{font-size:15px}
+.records-header .count{font-size:12px;color:#a9caff;background:rgba(66,133,244,.12);padding:4px 9px;border-radius:999px}
+#records-list{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+#records-list .rec-row{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--border);font-size:12px;background:rgba(15,19,27,.45)}
 #records-list .rec-row:last-child{border-bottom:none}
-#records-list .rec-row .user{
-  color:#fff;font-weight:600;font-size:12px;
-  padding:2px 7px;border-radius:4px;flex-shrink:0;
-  background:#888;
-}
+#records-list .rec-row .user{color:#fff;font-weight:800;font-size:10px;padding:4px 6px;border-radius:5px;flex-shrink:0;background:#707b91}
 #records-list .rec-row .user[data-u="A"]{background:#3b8cf5}
 #records-list .rec-row .user[data-u="B"]{background:#59d97a;color:#0e1014}
 #records-list .rec-row .user[data-u="C"]{background:#ffd158;color:#0e1014}
 #records-list .rec-row .user[data-u="D"]{background:#a855f7}
-#records-list .rec-row .seq{
-  color:var(--accent);font-weight:600;flex-shrink:0;min-width:32px;
-}
-#records-list .rec-row .region{
-  color:var(--muted);font-size:12px;flex-shrink:0;
-}
-#records-list .rec-row .time{
-  color:var(--muted);font-size:12px;flex:1;
-}
-#records-list .rec-row .amount{
-  color:var(--yellow);font-weight:600;flex-shrink:0;
-}
-#records-list .rec-row .del{
-  color:#c0392b;font-size:12px;flex-shrink:0;
-  padding:4px 8px;border-radius:6px;background:rgba(192,57,43,0.15);
-  cursor:pointer;
-}
-#records-list .empty{
-  text-align:center;color:var(--muted);padding:40px 20px;font-size:14px;
-}
-
-nav.tabbar{
-  flex-shrink:0;display:flex;background:var(--card);
-  border-top:1px solid var(--border);
-  padding-bottom:var(--safe-bottom);
-}
-nav.tabbar button{
-  flex:1;background:transparent;border-radius:0;
-  padding:14px 4px;font-size:13px;color:var(--muted);
-  min-height:56px;font-weight:500;
-}
-nav.tabbar button.active{color:var(--accent)}
-
-.data-table{width:100%;border-collapse:collapse;font-size:14px}
-.data-table th{
-  background:var(--card2);padding:12px 8px;text-align:left;
-  font-weight:600;position:sticky;top:0;z-index:1;
-  border-bottom:1px solid var(--border);
-  font-size:14px;
-}
-.data-table td{
-  padding:10px 8px;border-bottom:1px solid var(--border);
-  word-break:break-all;line-height:1.4;
-}
-.data-table tr:last-child td{border-bottom:none}
-
-.setting-row{
-  display:flex;align-items:center;gap:10px;
-  margin-bottom:10px;padding:6px 0;
-}
-.setting-row label{flex:1;font-size:15px;line-height:1.3}
-.setting-row input{
-  width:110px !important;flex-shrink:0;text-align:center;
-  min-height:48px;font-size:16px;
-}
-.setting-row .unit{color:var(--muted);font-size:14px;width:26px;text-align:center}
-
-#loading{
-  position:fixed;inset:0;background:var(--bg);z-index:9999;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
-}
-#loading .spinner{
-  width:44px;height:44px;border:3px solid var(--border);
-  border-top-color:var(--accent);border-radius:50%;
-  animation:spin 0.8s linear infinite;
-}
-@keyframes spin{to{transform:rotate(360deg)}}
-#loading .msg{color:var(--muted);font-size:15px;text-align:center;padding:0 24px;line-height:1.6}
-
-.subtab-bar{display:flex;gap:6px;flex-shrink:0}
-.subtab-bar button{
-  padding:12px 4px;font-size:14px;min-height:46px;
-}
-.subtab-bar button.active{background:var(--accent)}
-.subtab-content{
-  flex:1;min-height:0;overflow:auto;background:var(--card);
-  border-radius:10px;
-}
-.empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:15px}
-
-#year-select{
-  background:var(--btn);color:var(--text);border:1px solid var(--border);
-  border-radius:8px;padding:6px 10px;font-size:13px;min-height:36px;
-}
-
-.risk-summary {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  padding: 10px 12px; margin-bottom: 10px;
-  background: linear-gradient(135deg, #2a1f22 0%, #1f1a1c 100%);
-  border-radius: 10px; font-size: 13px; font-weight: 600;
-}
-.risk-summary span {
-  padding: 4px 10px; background: var(--card); border-radius: 6px;
-}
-.risk-summary .max { color: #f26666; }
-.risk-summary .min { color: #59d97a; }
-.risk-summary .avg { color: #3b8cf5; }
-
-.table-wrap {
-  overflow-x: auto; -webkit-overflow-scrolling: touch;
-}
-.table-wrap table.data-table { min-width: 820px; }
-
-tr.risk-high    td:last-child { color: #f26666; font-weight: bold; }
-tr.risk-mid     td:last-child { color: #ffd158; font-weight: bold; }
-tr.risk-low     td:last-child { color: #59d97a; font-weight: bold; }
-tr.risk-unknown td:last-child { color: var(--muted); }
-
-.profit-pos { color: #f26666; font-weight: bold; }
-.profit-neg { color: #59d97a; font-weight: bold; }
-
-#learning-panel{
-  background:var(--card);border:1px solid var(--border);border-radius:12px;
-  padding:12px;display:flex;flex-direction:column;gap:9px;
-}
-#learning-panel .learning-title{font-size:14px;font-weight:650}
-#learning-panel .learning-help{font-size:12px;color:var(--muted);line-height:1.5}
-#learning-stats{font-size:12px;color:var(--muted);line-height:1.6}
+#records-list .rec-row .seq{color:#8ab6ff;font-weight:800;flex-shrink:0;min-width:26px}
+#records-list .rec-row .region{color:var(--muted);font-size:10px;flex-shrink:0}
+#records-list .rec-row .time{color:var(--muted);font-size:10px;flex:1;min-width:44px}
+#records-list .rec-row .amount{color:var(--warning);font-weight:800;flex-shrink:0}
+#records-list .rec-row .del{color:#ff9d9d;font-size:11px;flex-shrink:0;padding:5px 7px;border-radius:7px;background:rgba(255,119,119,.09);cursor:pointer}
+.disclosure{border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);overflow:hidden}
+.disclosure>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;list-style:none;cursor:pointer}
+.disclosure>summary::-webkit-details-marker{display:none}
+.disclosure-title{display:flex;align-items:center;gap:10px;min-width:0}
+.icon-badge{display:grid;place-items:center;width:38px;height:38px;border:1px solid var(--border);border-radius:12px;background:var(--panel-soft);font-size:18px;flex-shrink:0}
+.disclosure-title strong{display:block;font-size:14px}
+.disclosure-title span{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.chevron{color:var(--muted);font-size:18px;transition:transform .15s}
+.disclosure[open] .chevron{transform:rotate(180deg)}
+.learning-panel{display:flex;flex-direction:column;gap:10px;padding:0 14px 14px}
+.learning-title{display:none}
+.learning-help{font-size:12px;color:var(--muted);line-height:1.6}
+#learning-stats{font-size:12px;line-height:1.6;color:#a9c8f7;padding:10px 11px;background:rgba(66,133,244,.07);border:1px solid rgba(66,133,244,.15);border-radius:10px}
+.sync-config{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--border);background:rgba(15,19,27,.5);border-radius:12px}
+.sync-config>strong{font-size:13px}
+.sync-config .learning-btn-row{display:flex;gap:7px;flex-wrap:wrap}
+.sync-config .learning-btn-row button{flex:1}
+#learning-sync-status{font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.sync-help{font-size:11px;color:var(--subtle);line-height:1.5}
 .learning-btn-row{display:flex;gap:7px;flex-wrap:wrap}
-.learning-btn-row button{font-size:13px;padding:10px 9px;min-height:40px}
-.learning-btn-row .learn-good{background:#163f2a;color:#b9f6ce}
-.learning-btn-row .learn-correct{background:#493819;color:#ffe2a6}
-.learning-btn-row .learn-unknown{background:#303642;color:#eef0f3}
+.learning-btn-row button{flex:1;min-width:105px;font-size:12px;padding:9px 10px;min-height:40px}
+.learning-btn-row .learn-good{background:rgba(85,217,155,.10);border-color:rgba(85,217,155,.18);color:#9ce9c2}
+.learning-btn-row .learn-correct{background:rgba(255,209,102,.09);border-color:rgba(255,209,102,.18);color:#ffe0a0}
+.learning-btn-row .learn-unknown{background:var(--panel-soft);border-color:var(--border)}
 #learning-recent{display:flex;flex-direction:column;gap:7px}
-.learning-case{
-  border:1px solid var(--border);border-radius:8px;padding:9px;
-  display:flex;align-items:center;gap:8px;min-width:0;
-}
+.learning-case{border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;align-items:center;gap:8px;min-width:0}
 .learning-case-main{min-width:0;flex:1}
-.learning-case-title{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
-.learning-case-summary{font-size:12px;color:var(--muted);margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere}
-.learning-delete{flex:0 0 auto;min-width:50px;min-height:36px;padding:6px 9px;font-size:12px;background:#492323}
-.learning-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px}
+.learning-case-title{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.learning-case-summary{font-size:11px;color:var(--muted);margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.learning-delete{flex:0 0 auto;min-width:48px;min-height:34px;padding:6px 8px;font-size:11px;background:rgba(255,119,119,.10);color:#ffb3b3}
+.subtab-bar{display:flex;gap:6px;flex-shrink:0;background:#0f131b;padding:5px;border:1px solid var(--border);border-radius:12px}
+.subtab-bar button{flex:1;min-height:40px;padding:8px 4px;font-size:12px;background:transparent;color:var(--muted)}
+.subtab-bar button.active{background:var(--accent);color:#fff}
+.subtab-content{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:12px}
+.data-table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+.data-table th{background:var(--panel-soft);padding:11px 9px;text-align:left;font-weight:750;position:sticky;top:0;z-index:1;border-bottom:1px solid var(--border);font-size:11px;color:#d8dfec}
+.data-table td{padding:10px 9px;border-bottom:1px solid var(--border);line-height:1.4}
+.data-table tr:last-child td{border-bottom:none}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px}
+.table-wrap table.data-table{min-width:780px}
+.risk-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:0;margin:0 0 10px;background:transparent;font-size:11px}
+.risk-summary span{padding:10px;background:var(--panel);border:1px solid var(--border);border-radius:10px;line-height:1.45}
+.risk-summary .max{color:#ff9a9a}.risk-summary .min{color:#8ee4b5}.risk-summary .avg{color:#91bbff}
+tr.risk-high td:last-child{color:#ff8c8c;font-weight:800}tr.risk-mid td:last-child{color:#ffd166;font-weight:800}tr.risk-low td:last-child{color:#7ce3aa;font-weight:800}tr.risk-unknown td:last-child{color:var(--muted)}
+.profit-pos{color:#ff9898;font-weight:800}.profit-neg{color:#7ce3aa;font-weight:800}
+.setting-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:7px 0}
+.setting-row label{flex:1;font-size:13px;line-height:1.4}
+.setting-row input{width:110px!important;flex-shrink:0;text-align:center;min-height:44px;font-size:14px}
+.setting-row .unit{color:var(--muted);font-size:12px;width:22px;text-align:center}
+#settings-content{flex:1;overflow:auto;min-height:0}
+#loading{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#loading .spinner{width:42px;height:42px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading .msg{color:var(--muted);font-size:14px;text-align:center;padding:0 24px;line-height:1.6}
+.learning-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:16px}
 .learning-modal[hidden]{display:none!important}
-.learning-dialog{width:min(680px,100%);max-height:90dvh;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.learning-dialog{width:min(680px,100%);max-height:90dvh;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
 .learning-dialog h2{font-size:17px}
-.learning-source{font-size:13px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;background:var(--card2);padding:10px;border-radius:8px}
-#learning-corrected-text{width:100%;min-height:190px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+.learning-source{font-size:12px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;background:var(--panel-soft);padding:10px;border-radius:8px}
+#learning-corrected-text{width:100%;min-height:190px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font:13px/1.65 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
 #learning-modal-message{font-size:12px;line-height:1.5;color:var(--muted)}
-
+nav.tabbar{flex-shrink:0;display:flex;justify-content:space-around;gap:3px;background:rgba(20,24,33,.98);border-top:1px solid var(--border);padding:5px 5px calc(5px + var(--safe-bottom));backdrop-filter:blur(18px)}
+nav.tabbar button{flex:1;min-width:0;min-height:49px;background:transparent;border:none;border-radius:10px;padding:8px 2px;font-size:11px;color:var(--muted);font-weight:650}
+nav.tabbar button:before{display:block;font-size:17px;line-height:1.25;margin-bottom:3px}
+nav.tabbar button[data-tab="input"]:before{content:"✎"}nav.tabbar button[data-tab="summary"]:before{content:"▦"}nav.tabbar button[data-tab="win"]:before{content:"✓"}nav.tabbar button[data-tab="risk"]:before{content:"◇"}nav.tabbar button[data-tab="settings"]:before{content:"⚙"}
+nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
+#learning-panel .learning-btn-row .learn-good{color:#9ce9c2}
+#learning-panel .learning-btn-row .learn-correct{color:#ffe0a0}
+#learning-panel .learning-btn-row .learn-unknown{color:#dfe5ef}
+#learning-panel .learning-btn-row button{white-space:normal}
+@media(min-width:760px){
+  .tab{padding:24px 24px 30px;gap:16px}
+  .card{padding:20px}
+  #raw-input{min-height:175px}
+  .preview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .parsed-group-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  nav.tabbar{padding-left:max(8px,calc((100vw - 760px)/2));padding-right:max(8px,calc((100vw - 760px)/2))}
+  nav.tabbar button{font-size:12px}
+}
+@media(max-width:420px){
+  header.app-header{padding:10px 12px;gap:8px}
+  .brand-mark{width:34px;height:34px}
+  .brand-copy h1{font-size:15px}
+  .brand-copy p{font-size:10px}
+  #status{font-size:10px;padding:5px 7px}
+  #year-select{max-width:115px;font-size:10px}
+  .tab{padding:14px 11px 18px;gap:11px}
+  .tab-heading h2{font-size:20px}
+  .card{padding:12px}
+  .btn-row{gap:6px}
+  .btn-row button{min-width:84px;padding:10px 9px;font-size:12px}
+  .group-meta{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .group-meta strong{font-size:12px}
+  .risk-summary{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
-
 <div id="loading">
   <div class="spinner"></div>
-  <div class="msg" id="loading-msg">正在启动…</div>
+  <div class="msg" id="loading-msg">正在启动 BetTool…</div>
 </div>
-
-<header>
-  <h1>押注统计</h1>
-  <span id="status">初始化中…</span>
+<header class="app-header">
+  <div class="brand">
+    <div class="brand-mark">BT</div>
+    <div class="brand-copy"><h1>BetTool</h1><p>押注解析与统计</p></div>
+  </div>
+  <div class="header-right"><span id="status">正在初始化…</span></div>
 </header>
-
 <main>
   <section class="tab active" id="tab-input">
-    <div class="user-bar">
-      <span>当前用户：</span>
+    <div class="tab-heading">
+      <div><h2>快速录入</h2><p>粘贴下注文字，检查识别结果后再添加记录。</p></div>
+    </div>
+    <div class="user-bar" role="group" aria-label="当前用户">
+      <span>当前用户</span>
       <button data-user="A" onclick="switchUser('A')">A</button>
       <button data-user="B" onclick="switchUser('B')">B</button>
       <button data-user="C" onclick="switchUser('C')">C</button>
       <button data-user="D" onclick="switchUser('D')">D</button>
     </div>
+    <section class="card input-card">
+      <label class="field-label" for="raw-input">下注内容</label>
+      <textarea id="raw-input" rows="5" spellcheck="false" placeholder="在这里粘贴下注内容…&#10;例如：龙鸡二连肖200&#10;猴30米&#10;鸡狗鼠各肖10"></textarea>
+      <div class="input-meta"><span>支持多行内容与多种玩法</span><span>先解析，再核对</span></div>
+      <div class="btn-row input-actions">
+        <button class="secondary" id="btn-paste" onclick="onPaste()">粘贴</button>
+        <button class="primary" id="btn-ai-parse" onclick="doPreview(true,true)">智能解析</button>
+        <button class="secondary" id="btn-clear-input" onclick="onClearInput()">清空</button>
+      </div>
+      <div id="ai-status" class="ai-status" data-state="idle" role="status" aria-live="polite">输入内容后会先进行本地预览；需要 AI 辅助时点击“智能解析”。</div>
+    </section>
 
-    <textarea id="raw-input" placeholder="粘贴下注内容…
-例：龙鸡二连肖200 / 猴30米 / 鸡狗鼠各肖10"></textarea>
-    <div id="ai-status">🤖 AI智能解析：本地失败后自动兜底，也可点“AI解析”手动触发</div>
-    <div id="preview-box">（等待输入）</div>
-    <div class="btn-row">
-      <button onclick="onPaste()">粘贴</button>
-      <button class="primary" onclick="onAdd()">添加</button>
-      <button onclick="doPreview(true, true)">🤖 AI解析</button>
-      <button onclick="onCopy()">复制</button>
-      <button class="danger" onclick="onClearInput()">清空</button>
-    </div>
-    <div id="learning-panel">
-      <div class="learning-title">🧠 AI 自我迭代 · 本地学习库</div>
-      <div class="learning-help">先核对结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容只记录为待处理样本。云端同步仅供你自己的设备使用；同步令牌保存在本浏览器，不会写入代码仓库。</div>
-      <div id="learning-stats">正在加载学习库…</div>
-      <div style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:9px;display:flex;flex-direction:column;gap:8px">
-        <strong style="font-size:13px">🌐 私人云端学习库同步</strong>
-        <input id="learning-sync-url" type="url" autocomplete="url" placeholder="Worker 地址，例如 https://bettool-private-learning-sync.xxx.workers.dev">
-        <input id="learning-sync-token" type="password" autocomplete="off" placeholder="你的私人同步令牌（建议 64 位随机十六进制）">
-        <div class="learning-btn-row">
-          <button onclick="saveLearningSyncConfig()">保存云端配置</button>
-          <button class="primary" onclick="syncLearningNow(false)">立即同步</button>
+    <section class="card result-card">
+      <div class="section-title">
+        <div><h3>解析结果</h3><p>重点核对玩法、号码、金额和组数。</p></div>
+        <span id="preview-state" class="badge">等待输入</span>
+      </div>
+      <div id="preview-box" class="preview-box" role="status" aria-live="polite">
+        <div class="preview-placeholder">等待输入下注内容。解析完成后会在这里逐组显示结果。</div>
+      </div>
+      <div id="totals" class="totals"><span>预览金额：<strong>—</strong></span><span>记录合计：<strong>—</strong></span></div>
+      <div class="btn-row preview-actions">
+        <button class="primary" id="btn-add" onclick="onAdd()">核对后添加</button>
+        <button class="secondary" id="btn-copy" onclick="onCopy()">复制解析</button>
+      </div>
+    </section>
+
+    <details id="learning-details" class="disclosure">
+      <summary>
+        <div class="disclosure-title"><div class="icon-badge">🧠</div><div><strong>AI 学习与云端同步</strong><span>纠错案例、备份与多设备同步</span></div></div>
+        <span class="chevron">⌄</span>
+      </summary>
+      <div id="learning-panel" class="learning-panel">
+        <div class="learning-title">AI 自我迭代 · 学习库</div>
+        <div class="learning-help">先核对解析结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容单独记录为待处理样本。</div>
+        <div id="learning-stats">正在加载学习库…</div>
+        <div class="sync-config">
+          <strong>🌐 私人云端学习库同步</strong>
+          <p class="field-help">同一把专用同步密钥只需在自己的每台设备上配置一次。不要公开分享。</p>
+          <label class="field-label" for="learning-sync-url">Worker 地址</label>
+          <input id="learning-sync-url" type="url" autocomplete="url" placeholder="https://你的-worker.workers.dev">
+          <label class="field-label" for="learning-sync-token">私人同步令牌</label>
+          <input id="learning-sync-token" type="password" autocomplete="off" placeholder="粘贴64位随机同步令牌">
+          <div class="learning-btn-row">
+            <button class="secondary" onclick="saveLearningSyncConfig()">保存云端配置</button>
+            <button class="primary" onclick="syncLearningNow(false)">立即同步</button>
+          </div>
+          <div id="learning-sync-status" role="status" aria-live="polite">云端同步未配置，当前只保存在本地浏览器。</div>
+          <div class="sync-help">首次迁移前先导出学习库备份。同步会合并本地与云端案例；同步成功后可在自己的其他设备读取。</div>
         </div>
-        <div id="learning-sync-status" role="status" aria-live="polite" style="font-size:12px;color:var(--muted)">云端同步未配置，当前只保存在本地浏览器。</div>
-        <div style="font-size:11px;color:var(--muted)">首次同步会合并本地与云端案例。请先备份学习库。未配置云端时，原有本地模式不变。</div>
+        <div class="learning-btn-row">
+          <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
+          <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
+          <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
+        </div>
+        <div class="learning-btn-row">
+          <button class="secondary" onclick="toggleLearningRecent()">查看最近案例</button>
+          <button class="secondary" onclick="exportLearningData()">导出学习库</button>
+          <button class="secondary" onclick="document.getElementById('learning-import-file').click()">导入备份</button>
+          <input id="learning-import-file" type="file" accept=".json,application/json" style="display:none" onchange="importLearningFile(this)">
+        </div>
+        <div id="learning-recent" hidden></div>
       </div>
-      <div class="learning-btn-row">
-        <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
-        <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
-        <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
-      </div>
-      <div class="learning-btn-row">
-        <button onclick="toggleLearningRecent()">查看最近案例</button>
-        <button onclick="exportLearningData()">导出学习库</button>
-        <button onclick="document.getElementById('learning-import-file').click()">导入备份</button>
-        <input id="learning-import-file" type="file" accept=".json,application/json" style="display:none" onchange="importLearningFile(this)">
-      </div>
-      <div id="learning-recent" hidden></div>
-    </div>
-    <div id="totals"></div>
+    </details>
 
-    <div class="records-header">
-      <h3>已添加记录</h3>
-      <span class="count" id="records-count">0</span>
-    </div>
-    <div id="records-list">
-      <div class="empty">还没有记录</div>
-    </div>
+    <section class="card records-panel">
+      <div class="records-header"><h3>已添加记录</h3><span class="count" id="records-count">0 条</span></div>
+      <div id="records-list"><div class="empty">还没有记录</div></div>
+    </section>
   </section>
 
   <section class="tab" id="tab-summary">
+    <div class="tab-heading"><div><h2>数据汇总</h2><p>按号码、生肖和玩法查看已添加记录。</p></div></div>
     <div class="subtab-bar">
       <button data-subtab="numbers" class="active" onclick="switchSubtab('numbers')">号码</button>
       <button data-subtab="zodiac" onclick="switchSubtab('zodiac')">生肖</button>
       <button data-subtab="plays" onclick="switchSubtab('plays')">玩法</button>
     </div>
-    <div class="subtab-content" id="summary-content"></div>
-    <div class="btn-row">
-      <button class="danger" onclick="onClearAll()">清空全部记录</button>
-    </div>
+    <div class="subtab-content" id="summary-content"><div class="empty">添加记录后，这里会显示统计结果。</div></div>
+    <button class="danger full" onclick="onClearAll()">清空全部记录</button>
   </section>
 
   <section class="tab" id="tab-win">
-    <input type="text" id="macau-draw" placeholder="澳门开奖号码（7 个）">
-    <input type="text" id="hk-draw" placeholder="香港开奖号码（7 个）">
-    <div class="user-bar">
-      <span>筛选用户：</span>
-      <button data-winfilter="全部" onclick="switchWinFilter('全部')">全部</button>
-      <button data-winfilter="A" onclick="switchWinFilter('A')">A</button>
-      <button data-winfilter="B" onclick="switchWinFilter('B')">B</button>
-      <button data-winfilter="C" onclick="switchWinFilter('C')">C</button>
-      <button data-winfilter="D" onclick="switchWinFilter('D')">D</button>
-    </div>
-    <div class="btn-row">
-      <button onclick="onRefreshWin()">刷新中奖</button>
-      <button class="primary" onclick="onExport()">导出 Excel</button>
-    </div>
-    <div class="subtab-content" id="win-content"></div>
+    <div class="tab-heading"><div><h2>中奖结算</h2><p>填写开奖号码后，对现有记录进行结算。</p></div></div>
+    <section class="card">
+      <label class="field-label" for="macau-draw">澳门开奖号码（7 个）</label>
+      <input type="text" id="macau-draw" inputmode="numeric" placeholder="例如：01 08 12 23 34 41 49">
+      <label class="field-label" for="hk-draw" style="margin-top:12px">香港开奖号码（7 个）</label>
+      <input type="text" id="hk-draw" inputmode="numeric" placeholder="输入香港开奖号码">
+      <div class="user-bar" style="margin-top:12px">
+        <span>筛选用户</span>
+        <button data-winfilter="全部" onclick="switchWinFilter('全部')">全部</button>
+        <button data-winfilter="A" onclick="switchWinFilter('A')">A</button>
+        <button data-winfilter="B" onclick="switchWinFilter('B')">B</button>
+        <button data-winfilter="C" onclick="switchWinFilter('C')">C</button>
+        <button data-winfilter="D" onclick="switchWinFilter('D')">D</button>
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="primary" onclick="onRefreshWin()">刷新结算</button>
+        <button class="secondary" onclick="onExport()">导出 Excel</button>
+      </div>
+    </section>
+    <div class="subtab-content" id="win-content"><div class="empty">输入开奖号码后点击“刷新结算”。</div></div>
   </section>
 
   <section class="tab" id="tab-risk">
-    <div class="subtab-content" id="risk-content"></div>
+    <div class="tab-heading"><div><h2>风险分析</h2><p>展示当前记录的风险分布与盈亏估算。</p></div></div>
+    <div class="subtab-content" id="risk-content"><div class="empty">添加记录后可以查看风险分析。</div></div>
   </section>
 
   <section class="tab" id="tab-settings">
+    <div class="tab-heading"><div><h2>设置</h2><p>管理 API 密钥、赔率及回水参数。</p></div></div>
     <div class="subtab-bar">
       <button data-settings-tab="odds" class="active" onclick="switchSettingsTab('odds')">赔率</button>
       <button data-settings-tab="rebate" onclick="switchSettingsTab('rebate')">回水</button>
     </div>
-    <div id="settings-content" style="flex:1;overflow:auto"></div>
+    <div id="settings-content"></div>
     <div class="btn-row">
-      <button onclick="onResetSettings()">恢复默认</button>
+      <button class="secondary" onclick="onResetSettings()">恢复默认</button>
       <button class="primary" onclick="onSaveSettings()">保存设置</button>
     </div>
   </section>
@@ -388,28 +376,27 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 <div id="learning-modal" class="learning-modal" hidden>
   <div class="learning-dialog" role="dialog" aria-modal="true" aria-labelledby="learning-modal-title">
     <h2 id="learning-modal-title">纠错并保存学习案例</h2>
-    <div style="font-size:13px">原始下注文字：</div>
+    <div class="field-help">原始下注文字：</div>
     <div id="learning-source-text" class="learning-source"></div>
-    <label for="learning-corrected-text" style="font-size:13px">正确的标准解析文本</label>
+    <label class="field-label" for="learning-corrected-text">正确的标准解析文本</label>
     <textarea id="learning-corrected-text" spellcheck="false" placeholder="例如：三中三 45-05-22各组10"></textarea>
     <div id="learning-modal-message">请修正后再保存。</div>
     <div class="btn-row">
-      <button onclick="closeCorrectionEditor()">取消</button>
+      <button class="secondary" onclick="closeCorrectionEditor()">取消</button>
       <button id="learning-save-correction" class="primary" onclick="saveCorrectionCase()">校验并保存案例</button>
     </div>
   </div>
 </div>
 
-<nav class="tabbar">
+<nav class="tabbar" aria-label="主导航">
   <button data-tab="input" class="active" onclick="switchTab('input')">输入</button>
   <button data-tab="summary" onclick="switchTab('summary')">汇总</button>
   <button data-tab="win" onclick="switchTab('win')">中奖</button>
   <button data-tab="risk" onclick="switchTab('risk')">风险</button>
   <button data-tab="settings" onclick="switchTab('settings')">设置</button>
 </nav>
-
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=13"></script>
-<script src="learning.js?v=2"></script>
+<script src="app.js?v=14"></script>
+<script src="learning.js?v=3"></script>
 </body>
 </html>
