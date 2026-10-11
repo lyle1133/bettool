@@ -2,7 +2,7 @@ name: Parser regression checks
 
 on:
   push:
-    branches: [main, ai-parser-v6, ai-self-learning-v1]
+    branches: [main, ai-parser-v6, ai-self-learning-v1, feat/private-cloud-learning-sync]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -27,3 +27,5 @@ jobs:
           node tests/test_learning_logic.js
       - name: Run parser regression tests
         run: python -m unittest discover -s tests -v
+      - name: Test private cloud-sync Worker
+        run: node --test worker/test/*.test.js

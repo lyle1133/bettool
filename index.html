@@ -301,8 +301,19 @@ tr.risk-unknown td:last-child { color: var(--muted); }
     </div>
     <div id="learning-panel">
       <div class="learning-title">🧠 AI 自我迭代 · 本地学习库</div>
-      <div class="learning-help">先核对结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容只记录为待处理样本。</div>
+      <div class="learning-help">先核对结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容只记录为待处理样本。云端同步仅供你自己的设备使用；同步令牌保存在本浏览器，不会写入代码仓库。</div>
       <div id="learning-stats">正在加载学习库…</div>
+      <div style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:9px;display:flex;flex-direction:column;gap:8px">
+        <strong style="font-size:13px">🌐 私人云端学习库同步</strong>
+        <input id="learning-sync-url" type="url" autocomplete="url" placeholder="Worker 地址，例如 https://bettool-private-learning-sync.xxx.workers.dev">
+        <input id="learning-sync-token" type="password" autocomplete="off" placeholder="你的私人同步令牌（建议 64 位随机十六进制）">
+        <div class="learning-btn-row">
+          <button onclick="saveLearningSyncConfig()">保存云端配置</button>
+          <button class="primary" onclick="syncLearningNow(false)">立即同步</button>
+        </div>
+        <div id="learning-sync-status" role="status" aria-live="polite" style="font-size:12px;color:var(--muted)">云端同步未配置，当前只保存在本地浏览器。</div>
+        <div style="font-size:11px;color:var(--muted)">首次同步会合并本地与云端案例。请先备份学习库。未配置云端时，原有本地模式不变。</div>
+      </div>
       <div class="learning-btn-row">
         <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
         <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
@@ -398,7 +409,7 @@ tr.risk-unknown td:last-child { color: var(--muted); }
 </nav>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=12"></script>
-<script src="learning.js?v=1"></script>
+<script src="app.js?v=13"></script>
+<script src="learning.js?v=2"></script>
 </body>
 </html>

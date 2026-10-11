@@ -6,6 +6,15 @@ const LEARNING_KEY = "bettool_learning_cases_v1";
 const MAX_LEARNING_CASES = 1000;
 const MAX_UNRESOLVED_CASES = 500;
 
+const LEARNING_SYNC_URL_KEY = "bettool_sync_url_v1";
+const LEARNING_SYNC_TOKEN_KEY = "bettool_sync_token_v1";
+const LEARNING_SYNC_MAX_BYTES = 850000;
+let learningSyncReady = false;
+let learningSyncRevision = null;
+let learningSyncTimer = null;
+let learningSyncBusy = false;
+let suppressLearningAutoSync = false;
+
 let learningStore = {
   version: 1,
   cases: [],
@@ -111,6 +120,10 @@ function loadLearningStore() {
     toast("学习案例库无法读取，已使用空学习库；未自动删除原始数据", 3500);
   }
   updateLearningUI();
+  const cfg = getLearningSyncConfig();
+  if (cfg.url && cfg.token && typeof setTimeout === "function") {
+    setTimeout(() => syncLearningNow(true), 900);
+  }
 }
 
 function saveLearningStore() {
@@ -119,11 +132,217 @@ function saveLearningStore() {
     learningStore.unresolved = learningStore.unresolved.slice(-MAX_UNRESOLVED_CASES);
     localStorage.setItem(LEARNING_KEY, JSON.stringify(learningStore));
     updateLearningUI();
+    if (!suppressLearningAutoSync && learningSyncReady) scheduleLearningSync();
     return true;
   } catch (e) {
     console.warn("学习案例库保存失败：", e);
     toast("学习库保存失败，可能是浏览器空间不足。请先导出备份", 3500);
     return false;
+  }
+}
+
+
+// ==================== 私人云端同步（可选） ====================
+function getLearningSyncConfig() {
+  try {
+    return {
+      url: String(localStorage.getItem(LEARNING_SYNC_URL_KEY) || "").trim(),
+      token: String(localStorage.getItem(LEARNING_SYNC_TOKEN_KEY) || "").trim()
+    };
+  } catch (_) {
+    return { url: "", token: "" };
+  }
+}
+
+function learningSyncEndpoint(base) {
+  const parsed = new URL(String(base || "").trim());
+  if (parsed.protocol !== "https:") throw new Error("云端地址必须以 https:// 开头");
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return parsed.origin + (path.endsWith("/api/v1/learning")
+    ? path : (path ? path : "") + "/api/v1/learning");
+}
+
+function setLearningSyncStatus(message, isError) {
+  const node = $("#learning-sync-status");
+  if (!node) return;
+  node.textContent = message;
+  node.style.color = isError ? "var(--danger, #ff7777)" : "var(--muted)";
+}
+
+function saveLearningSyncConfig() {
+  const urlInput = $("#learning-sync-url");
+  const tokenInput = $("#learning-sync-token");
+  if (!urlInput || !tokenInput) return false;
+  const url = urlInput.value.trim().replace(/\/+$/, "");
+  const token = tokenInput.value.trim();
+  try {
+    learningSyncEndpoint(url);
+  } catch (e) {
+    toast("云端地址无效：" + e.message);
+    return false;
+  }
+  if (token.length < 32) {
+    toast("同步令牌至少需要 32 个字符，建议使用随机生成的 64 位十六进制令牌");
+    return false;
+  }
+  try {
+    localStorage.setItem(LEARNING_SYNC_URL_KEY, url);
+    localStorage.setItem(LEARNING_SYNC_TOKEN_KEY, token);
+    learningSyncReady = false;
+    learningSyncRevision = null;
+    updateLearningUI();
+    setLearningSyncStatus("配置已保存在此浏览器；请点击“立即同步”验证连接。", false);
+    toast("云端配置已保存到当前浏览器");
+    return true;
+  } catch (e) {
+    toast("无法保存云端配置：" + e.message, 3500);
+    return false;
+  }
+}
+
+function mergeLearningStores(localData, remoteData) {
+  const local = localData && typeof localData === "object" ? localData : {};
+  const remote = remoteData && typeof remoteData === "object" ? remoteData : {};
+  const byKey = new Map();
+  const caseKey = item => String(item.year_animal || "马") + "|" + learningTextKey(item.raw_text);
+  for (const raw of [...(Array.isArray(remote.cases) ? remote.cases : []),
+                     ...(Array.isArray(local.cases) ? local.cases : [])]) {
+    const item = sanitizeLearningCase(raw);
+    if (!item) continue;
+    const key = caseKey(item);
+    const old = byKey.get(key);
+    if (!old || String(item.updated_at || "") >= String(old.updated_at || "")) byKey.set(key, item);
+  }
+  const unresolvedMap = new Map();
+  const unresolvedKey = item => learningTextKey(item.raw_text) + "|" +
+    String(item.created_at || "") + "|" + String(item.note || "");
+  for (const raw of [...(Array.isArray(remote.unresolved) ? remote.unresolved : []),
+                     ...(Array.isArray(local.unresolved) ? local.unresolved : [])]) {
+    if (!raw || typeof raw.raw_text !== "string" || !raw.raw_text.trim()) continue;
+    const item = {
+      raw_text: String(raw.raw_text).slice(0, 10000),
+      created_at: String(raw.created_at || new Date().toISOString()),
+      note: String(raw.note || "").slice(0, 1000)
+    };
+    unresolvedMap.set(unresolvedKey(item), item);
+  }
+  const metricKeys = Object.keys(learningMetricDefaults());
+  const metrics = {};
+  for (const key of metricKeys) {
+    const a = Number((local.metrics || {})[key] || 0);
+    const b = Number((remote.metrics || {})[key] || 0);
+    metrics[key] = Math.max(0, Number.isFinite(a) ? Math.floor(a) : 0,
+      Number.isFinite(b) ? Math.floor(b) : 0);
+  }
+  return {
+    version: 1,
+    cases: Array.from(byKey.values()).sort((a, b) =>
+      String(a.updated_at).localeCompare(String(b.updated_at))).slice(-MAX_LEARNING_CASES),
+    unresolved: Array.from(unresolvedMap.values()).sort((a, b) =>
+      String(a.created_at).localeCompare(String(b.created_at))).slice(-MAX_UNRESOLVED_CASES),
+    metrics
+  };
+}
+
+function replaceLearningStoreFromSync(value) {
+  learningStore = mergeLearningStores(value, {});
+  suppressLearningAutoSync = true;
+  try {
+    saveLearningStore();
+  } finally {
+    suppressLearningAutoSync = false;
+  }
+}
+
+function scheduleLearningSync() {
+  if (!learningSyncReady || learningSyncBusy || suppressLearningAutoSync ||
+      typeof setTimeout !== "function") return;
+  if (learningSyncTimer) clearTimeout(learningSyncTimer);
+  learningSyncTimer = setTimeout(() => {
+    learningSyncTimer = null;
+    syncLearningNow(true);
+  }, 1200);
+}
+
+async function syncLearningNow(silent) {
+  if (learningSyncBusy) {
+    if (!silent) toast("同步正在进行，请稍候");
+    return false;
+  }
+  const config = getLearningSyncConfig();
+  if (!config.url || !config.token) {
+    setLearningSyncStatus("尚未配置云端地址和同步令牌；当前仍使用本地学习库。", true);
+    if (!silent) toast("请先填写云端地址和同步令牌");
+    return false;
+  }
+  let endpoint;
+  try {
+    endpoint = learningSyncEndpoint(config.url);
+  } catch (e) {
+    setLearningSyncStatus("云端地址无效：" + e.message, true);
+    if (!silent) toast(e.message);
+    return false;
+  }
+
+  learningSyncBusy = true;
+  setLearningSyncStatus("正在连接云端并合并本地案例…", false);
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const getResponse = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Authorization": "Bearer " + config.token, "Accept": "application/json" },
+        cache: "no-store"
+      });
+      const cloud = await getResponse.json().catch(() => ({}));
+      if (!getResponse.ok) {
+        throw new Error(cloud.error || ("云端读取失败 HTTP " + getResponse.status));
+      }
+      let merged = mergeLearningStores(learningStore, cloud.store || {});
+      replaceLearningStoreFromSync(merged);
+
+      const payload = { expected_revision: Number(cloud.revision || 0), store: merged };
+      const encoded = JSON.stringify(payload);
+      if (encoded.length > LEARNING_SYNC_MAX_BYTES) {
+        throw new Error("学习库超过云端单次同步大小限制。请先导出备份并清理过大的案例。");
+      }
+      const putResponse = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          "Authorization": "Bearer " + config.token,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: encoded,
+        cache: "no-store"
+      });
+      const saved = await putResponse.json().catch(() => ({}));
+      if (putResponse.status === 409) {
+        learningSyncRevision = Number(saved.revision || 0);
+        if (!saved.store) throw new Error("云端发生版本冲突，但没有返回可合并数据");
+        merged = mergeLearningStores(learningStore, saved.store);
+        replaceLearningStoreFromSync(merged);
+        continue;
+      }
+      if (!putResponse.ok) {
+        throw new Error(saved.error || ("云端保存失败 HTTP " + putResponse.status));
+      }
+      learningSyncRevision = Number(saved.revision || payload.expected_revision + 1);
+      learningSyncReady = true;
+      updateLearningUI();
+      setLearningSyncStatus("✅ 云端同步成功 · 版本 " + learningSyncRevision +
+        " · 案例 " + learningStore.cases.length + " 条", false);
+      if (!silent) toast("云端同步完成");
+      return true;
+    }
+    throw new Error("多设备数据持续冲突。请稍后再次点击“立即同步”。");
+  } catch (e) {
+    console.warn("云端学习库同步失败：", e);
+    setLearningSyncStatus("同步失败：" + e.message + "；本地数据未清除。", true);
+    if (!silent) toast("同步失败：" + e.message, 4500);
+    return false;
+  } finally {
+    learningSyncBusy = false;
+    updateLearningUI();
   }
 }
 
@@ -360,6 +579,17 @@ function markCurrentUnresolved() {
 }
 
 function updateLearningUI() {
+  const syncConfig = getLearningSyncConfig();
+  const urlInput = $("#learning-sync-url");
+  const tokenInput = $("#learning-sync-token");
+  if (urlInput && (!document.activeElement || document.activeElement !== urlInput)) urlInput.value = syncConfig.url;
+  if (tokenInput && (!document.activeElement || document.activeElement !== tokenInput)) tokenInput.value = syncConfig.token;
+  const syncStatus = $("#learning-sync-status");
+  if (syncStatus && !learningSyncBusy) {
+    if (learningSyncReady) syncStatus.textContent = "云端同步已连接 · 版本 " + (learningSyncRevision === null ? "已验证" : learningSyncRevision);
+    else if (syncConfig.url && syncConfig.token) syncStatus.textContent = "云端配置已保存；等待同步验证。";
+    else syncStatus.textContent = "云端同步未配置，当前只保存在本地浏览器。";
+  }
   const stats = $("#learning-stats");
   if (stats) {
     stats.textContent =

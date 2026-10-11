@@ -83,4 +83,52 @@ const similar = vm.runInContext(
 );
 assert.equal(similar.length, 1, "similar confirmed case should be retrieved");
 
+
+const localSnapshot = {
+  content: sample.content,
+  total: sample.total,
+  groups: sample.groups
+};
+const localCase = {
+  id: "local-old",
+  raw_text: sample.raw_text,
+  corrected_text: sample.normalized_text,
+  year_animal: "马",
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+  source: "confirmed",
+  snapshot: localSnapshot
+};
+const cloudCase = {
+  ...localCase,
+  id: "cloud-new",
+  updated_at: "2026-10-01T00:00:00.000Z",
+  snapshot: { ...localSnapshot, content: "cloud-corrected" }
+};
+const merged = vm.runInContext(
+  "mergeLearningStores(" + JSON.stringify({
+    version: 1, cases: [localCase],
+    unresolved: [{raw_text:"无法识别 A",created_at:"2026-01-01T00:00:00.000Z",note:"pending"}],
+    metrics: {confirmed:1,corrected:0,markedUnresolved:1,exactHits:0,retrievals:0}
+  }) + ", " + JSON.stringify({
+    version: 1, cases: [cloudCase],
+    unresolved: [{raw_text:"无法识别 B",created_at:"2026-02-01T00:00:00.000Z",note:"pending"}],
+    metrics: {confirmed:3,corrected:1,markedUnresolved:2,exactHits:1,retrievals:2}
+  }) + ")",
+  context
+);
+assert.equal(merged.cases.length, 1, "same text/year should not be duplicated during sync");
+assert.equal(merged.cases[0].id, "cloud-new", "newer remote correction should win");
+assert.equal(merged.unresolved.length, 2, "local and cloud unresolved samples should merge");
+assert.equal(merged.metrics.confirmed, 3, "metrics should retain the higher seen count");
+
+assert.equal(
+  vm.runInContext('learningSyncEndpoint("https://example.workers.dev/")', context),
+  "https://example.workers.dev/api/v1/learning"
+);
+assert.throws(
+  () => vm.runInContext('learningSyncEndpoint("http://example.workers.dev")', context),
+  /https/
+);
+
 console.log("Learning module tests passed");
