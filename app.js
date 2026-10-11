@@ -71,6 +71,7 @@ function maskKey(key) {
 const AI_MIN_CONFIDENCE = 0.75;
 const AI_AUTO_FALLBACK = true;
 let aiBusy = false;
+let activeAiController = null;
 let aiTimer = null;
 let previewRequestId = 0;
 
@@ -367,13 +368,12 @@ async function callBetToolAI(text) {
   if (!apiKey || !apiKey.startsWith("gsk_")) {
     throw new Error("请先在「设置」页填入你的 Groq API Key");
   }
-  if (aiBusy) {
-    throw new Error("AI正在解析另一条内容，请稍后再试");
-  }
-
+  // 新输入到来时取消旧请求，避免旧结果占用 AI 请求锁或覆盖新预览。
+  if (activeAiController) activeAiController.abort();
   aiBusy = true;
   setStatus("🤖 AI正在解析…");
   const controller = new AbortController();
+  activeAiController = controller;
   const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
@@ -456,8 +456,11 @@ async function callBetToolAI(text) {
     throw error;
   } finally {
     clearTimeout(timeoutId);
-    aiBusy = false;
-    setStatus("🟢 本地解析 + AI");
+    if (activeAiController === controller) {
+      activeAiController = null;
+      aiBusy = false;
+      setStatus("🟢 本地解析 + AI");
+    }
   }
 }
 // ==================== 用户 & 筛选 ====================
