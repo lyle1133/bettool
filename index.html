@@ -269,6 +269,63 @@ input,textarea,select { background:#fff; color:#1F2937; border-color:#E5E7EB; }
   .input-actions button,.preview-actions button { min-height:44px; }
   .example-prompts button { min-height:40px; }
 }
+
+/* Final light-theme contrast pass */
+header.app-header{background:#fff;border-bottom:1px solid #E5E7EB}
+#year-select{background:#F3F4F6;color:#1F2937;border-color:#E5E7EB}
+.card{background:#fff;border-color:#E5E7EB;box-shadow:0 8px 24px rgba(31,41,55,.06)}
+textarea,input[type=text],input[type=number],input[type=url],input[type=password],input[type=search],select{
+  background:#fff;color:#1F2937;border-color:#D1D5DB
+}
+textarea::placeholder,input::placeholder{color:#6B7280;opacity:1}
+.user-bar button.active{background:#EFF6FF;border-color:#2563EB;color:#1D4ED8}
+.ai-status[data-state="busy"]{color:#1D4ED8;background:#EFF6FF;border-color:#BFDBFE}
+.ai-status[data-state="success"]{color:#047857;background:#ECFDF5;border-color:#A7F3D0}
+.ai-status[data-state="error"]{color:#B91C1C;background:#FEF2F2;border-color:#FECACA}
+.badge.success{color:#047857;background:#ECFDF5;border-color:#A7F3D0}
+.badge.warning{color:#92400E;background:#FFFBEB;border-color:#FDE68A}
+.badge.danger{color:#B91C1C;background:#FEF2F2;border-color:#FECACA}
+.preview-stat,.parsed-group-card,.summary-stats>div{background:#F9FAFB;border-color:#E5E7EB}
+.group-selection{color:#1F2937}
+.standard-text summary{color:#1D4ED8}
+.preview-warning{color:#92400E;background:#FFFBEB;border-color:#FDE68A}
+.ai-error-card{background:#FEF2F2;border-color:#FECACA}
+.ai-error-card strong{color:#B91C1C}
+.ai-error-card p{color:#7F1D1D}
+.ai-technical pre{color:#374151}
+.totals{background:#EFF6FF;border-color:#BFDBFE}
+.totals span{color:#4B5563}
+.totals .preview-total strong{color:#92400E}
+.records-header .count{color:#1D4ED8;background:#EFF6FF}
+#records-list .rec-row{background:#fff}
+#records-list .rec-row .seq{color:#1D4ED8}
+#records-list .rec-row .del{color:#B91C1C;background:#FEF2F2}
+#records-list .rec-row .user[data-u="B"],#records-list .rec-row .user[data-u="C"]{color:#1F2937}
+#learning-stats{color:#1D4ED8;background:#EFF6FF;border-color:#BFDBFE}
+.sync-config{background:#fff;border-color:#E5E7EB}
+.learning-btn-row .learn-good{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
+.learning-btn-row .learn-correct{background:#FFFBEB;border-color:#FDE68A;color:#92400E}
+.learning-btn-row .learn-unknown{background:#F3F4F6;border-color:#E5E7EB;color:#374151}
+.learning-delete{background:#FEF2F2;color:#B91C1C;border-color:#FECACA}
+.subtab-bar{background:#F3F4F6;border-color:#E5E7EB}
+.data-table th{background:#F3F4F6;color:#1F2937}
+.risk-summary .max{color:#B91C1C}.risk-summary .min{color:#047857}.risk-summary .avg{color:#1D4ED8}
+tr.risk-high td:last-child{color:#B91C1C}tr.risk-mid td:last-child{color:#92400E}tr.risk-low td:last-child{color:#047857}
+.profit-pos{color:#047857}.profit-neg{color:#B91C1C}
+.setting-row .unit{color:#6B7280}
+button.secondary{background:#F3F4F6;color:#1F2937;border-color:#E5E7EB}
+button.secondary:hover{background:#E5E7EB}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid rgba(37,99,235,.28);outline-offset:2px}
+@media(max-width:600px){
+  header.app-header{gap:7px;padding:9px 10px}
+  .brand-mark{display:none}
+  .brand-copy h1{font-size:13px;line-height:1.25}
+  .brand-copy p{font-size:10px}
+  .header-right{min-width:0}
+  #status{font-size:10px;padding:4px 6px}
+  #year-select{max-width:106px;font-size:10px;padding:5px 6px}
+}
+
 </style>
 </head>
 <body>
