@@ -889,6 +889,38 @@ function isSevereWarning(w) {
   return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
 }
 
+function learningSnapshotMatchesParsedCase(item, parsed) {
+  if (!item || !item.snapshot || !parsed) return false;
+  const saved = item.snapshot;
+  const savedGroups = Array.isArray(saved.groups) ? saved.groups : [];
+  const parsedGroups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+  const nearlyEqual = (a, b) =>
+    Number.isFinite(Number(a)) && Number.isFinite(Number(b)) &&
+    Math.abs(Number(a) - Number(b)) < 0.0001;
+  const groupsMatch = savedGroups.length === parsedGroups.length &&
+    savedGroups.every((oldGroup, index) => {
+      const newGroup = parsedGroups[index] || {};
+      return String(oldGroup.play_type || "") === String(newGroup.play_type || "") &&
+        String(oldGroup.billing_mode || "per_number") === String(newGroup.billing_mode || "per_number") &&
+        String(oldGroup.selection_text || "") === String(newGroup.selection_text || "") &&
+        nearlyEqual(oldGroup.amount, newGroup.amount) &&
+        nearlyEqual(oldGroup.total, newGroup.total) &&
+        Number(oldGroup.multiplier || 1) === Number(newGroup.multiplier || 1) &&
+        JSON.stringify(Array.isArray(oldGroup.numbers) ? oldGroup.numbers : []) ===
+          JSON.stringify(Array.isArray(newGroup.numbers) ? newGroup.numbers : []);
+    });
+  return parsedGroups.length > 0 && warnings.length === 0 &&
+    nearlyEqual(saved.total, parsed.total) && groupsMatch;
+}
+
+async function validateLearningCaseForReuse(item) {
+  const correctedText = String(item && item.corrected_text || "").trim();
+  if (!correctedText) return null;
+  const parsed = await pyParseBet(correctedText);
+  return learningSnapshotMatchesParsedCase(item, parsed) ? parsed : null;
+}
+
 async function doPreview(allowAI = false, forceAI = false, forceChunks = false) {
   const requestId = ++previewRequestId;
   if (!coreReady) return;
@@ -911,36 +943,14 @@ async function doPreview(allowAI = false, forceAI = false, forceChunks = false) 
   const exactCase = findExactLearningCase(text);
   if (exactCase && !forceAI && !forceChunks) {
     let cachedParsed = null;
-    let cacheIsConsistent = false;
     try {
-      cachedParsed = await pyParseBet(String(exactCase.corrected_text || ""));
+      cachedParsed = await validateLearningCaseForReuse(exactCase);
       if (!isCurrentRequest()) return;
-      const saved = exactCase.snapshot || {};
-      const savedGroups = Array.isArray(saved.groups) ? saved.groups : [];
-      const parsedGroups = Array.isArray(cachedParsed.groups) ? cachedParsed.groups : [];
-      const parseWarnings = Array.isArray(cachedParsed.warnings) ? cachedParsed.warnings : [];
-      const nearlyEqual = (a, b) =>
-        Number.isFinite(Number(a)) && Number.isFinite(Number(b)) &&
-        Math.abs(Number(a) - Number(b)) < 0.0001;
-      const groupDetailsMatch = savedGroups.length === parsedGroups.length &&
-        savedGroups.every((oldGroup, index) => {
-          const newGroup = parsedGroups[index] || {};
-          return String(oldGroup.play_type || "") === String(newGroup.play_type || "") &&
-            String(oldGroup.billing_mode || "per_number") === String(newGroup.billing_mode || "per_number") &&
-            String(oldGroup.selection_text || "") === String(newGroup.selection_text || "") &&
-            nearlyEqual(oldGroup.amount, newGroup.amount) &&
-            nearlyEqual(oldGroup.total, newGroup.total) &&
-            Number(oldGroup.multiplier || 1) === Number(newGroup.multiplier || 1) &&
-            JSON.stringify(Array.isArray(oldGroup.numbers) ? oldGroup.numbers : []) ===
-              JSON.stringify(Array.isArray(newGroup.numbers) ? newGroup.numbers : []);
-        });
-      cacheIsConsistent = parsedGroups.length > 0 && parseWarnings.length === 0 &&
-        nearlyEqual(saved.total, cachedParsed.total) && groupDetailsMatch;
     } catch (_) {
-      cacheIsConsistent = false;
+      cachedParsed = null;
     }
 
-    if (cacheIsConsistent) {
+    if (cachedParsed) {
       const result = JSON.parse(JSON.stringify(cachedParsed));
       result.raw_text = text;
       result.normalized_text = exactCase.corrected_text;
@@ -985,9 +995,22 @@ async function doPreview(allowAI = false, forceAI = false, forceChunks = false) 
       return;
     }
 
-    const similarCases = forceChunks ? [] : findSimilarLearningCases(text, 3);
+    let similarCases = forceChunks ? [] : findSimilarLearningCases(text, 3);
+    if (similarCases.length) {
+      const validatedCases = [];
+      for (const candidate of similarCases) {
+        try {
+          const verified = await validateLearningCaseForReuse(candidate);
+          if (verified) validatedCases.push(candidate);
+        } catch (_) {
+          // 无法重新校验的旧案例不送入 AI，避免错误历史污染本次解析。
+        }
+        if (!isCurrentRequest()) return;
+      }
+      similarCases = validatedCases;
+    }
     renderPreviewEmpty("本地规则需要进一步确认，正在调用 AI…" +
-      (similarCases.length ? " 已找到 " + similarCases.length + " 条相似学习案例。" : ""));
+      (similarCases.length ? " 已找到 " + similarCases.length + " 条通过校验的相似案例。" : ""));
     setAiStatus(forceChunks
       ? "正在用较短提示词分段重试；较长内容可能需要等待服务额度恢复。"
       : "正在调用 Groq AI，并保留本地解析结果…", "busy");
