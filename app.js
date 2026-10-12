@@ -1474,6 +1474,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  const feedbackToggle = $("#toggle-learning-feedback");
+  const feedbackActions = $("#learning-feedback-actions");
+  if (feedbackToggle && feedbackActions) {
+    feedbackToggle.addEventListener("click", () => {
+      const expanded = feedbackToggle.getAttribute("aria-expanded") === "true";
+      feedbackToggle.setAttribute("aria-expanded", String(!expanded));
+      feedbackActions.hidden = expanded;
+      const icon = feedbackToggle.querySelector(".disclosure-chevron");
+      if (icon) icon.textContent = expanded ? "＋" : "−";
+    });
+  }
+
   const learningToggle = $("#toggle-learning-details");
   const learningPanel = $("#learning-panel");
   if (learningToggle && learningPanel) {
