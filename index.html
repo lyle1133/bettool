@@ -250,7 +250,10 @@ input,textarea,select { background:#fff; color:#1F2937; border-color:#E5E7EB; }
 .disclosure-toggle .disclosure-title { display:flex;align-items:center;gap:10px; }
 .disclosure-toggle p { font-size:12px;color:#6B7280;margin-top:3px; }
 .disclosure-chevron { font-size:22px;color:#6B7280; }
-#learning-panel[hidden] { display:none!important; }
+#learning-panel[hidden], #learning-feedback-actions[hidden] { display:none!important; }
+.learning-feedback .section-title { width:100%;color:inherit; }
+.learning-feedback .section-title h3 { margin:0; }
+.learning-feedback .section-title p { font-size:12px;color:#6B7280;margin-top:3px; }
 #learning-panel .sync-help { color:#6B7280; }
 #learning-sync-status { overflow-wrap:anywhere; }
 @media (min-width:1024px) {
@@ -319,10 +322,10 @@ input,textarea,select { background:#fff; color:#1F2937; border-color:#E5E7EB; }
         <button class="secondary" id="btn-copy" onclick="onCopy()">复制解析</button>
       </div>
       <div class="learning-feedback" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-        <div class="section-title">
-          <div><h3>AI 学习反馈</h3><p>识别有误时纠正并记住；完全正确时确认案例。</p></div>
-        </div>
-        <div class="learning-btn-row">
+        <button type="button" class="section-title disclosure-toggle" id="toggle-learning-feedback" aria-expanded="false" aria-controls="learning-feedback-actions">
+          <span><h3>AI 学习反馈</h3><p>识别有误时纠正并记住；完全正确时确认案例。</p></span><span class="disclosure-chevron" aria-hidden="true">＋</span>
+        </button>
+        <div id="learning-feedback-actions" class="learning-btn-row" hidden>
           <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
           <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
           <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
