@@ -14,10 +14,33 @@ function allowedOrigins(env) {
   return String(env.ALLOWED_ORIGIN || "").split(",").map(v => v.trim()).filter(Boolean);
 }
 
+function isAllowedOrigin(origin, env) {
+  if (!origin) return false;
+  if (allowedOrigins(env).includes(origin)) return true;
+
+  // Cloudflare Pages creates deployment-specific preview hostnames such as
+  // <deployment-id>.bettool-private-learning-test.pages.dev. Allow only one
+  // HTTPS subdomain label for this project, not arbitrary *.pages.dev sites.
+  try {
+    const parsed = new URL(origin);
+    const suffix = ".bettool-private-learning-test.pages.dev";
+    const previewLabel = parsed.hostname.endsWith(suffix)
+      ? parsed.hostname.slice(0, -suffix.length)
+      : "";
+    return parsed.protocol === "https:" &&
+      parsed.origin === origin &&
+      !parsed.port &&
+      previewLabel.length > 0 &&
+      !previewLabel.includes(".");
+  } catch (_) {
+    return false;
+  }
+}
+
 function corsHeaders(request, env) {
   const headers = new Headers({ "Vary": "Origin", "Cache-Control": "no-store" });
   const origin = request.headers.get("Origin");
-  if (origin && allowedOrigins(env).includes(origin)) {
+  if (origin && isAllowedOrigin(origin, env)) {
     headers.set("Access-Control-Allow-Origin", origin);
     headers.set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
     headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept");
@@ -167,7 +190,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
-    if (origin && !allowedOrigins(env).includes(origin)) {
+    if (origin && !isAllowedOrigin(origin, env)) {
       return jsonResponse(request, env, { error: "origin_not_allowed" }, 403);
     }
     if (request.method === "OPTIONS") {
