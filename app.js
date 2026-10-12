@@ -907,28 +907,62 @@ async function doPreview(allowAI = false, forceAI = false, forceChunks = false) 
 
   if (allowAI) setAiStatus("正在检查输入并准备 AI 解析…", "busy");
 
-  // 命中人工确认过的完全相同原文时，直接复用结构化结果，不让模型重新猜。
+  // 完全相同原文的学习案例也必须重新校验；旧版本可能曾把带警告的错误结果保存为“正确”。
   const exactCase = findExactLearningCase(text);
   if (exactCase && !forceAI && !forceChunks) {
-    const result = JSON.parse(JSON.stringify(exactCase.snapshot));
-    result.raw_text = text;
-    result.normalized_text = exactCase.corrected_text;
-    result.ai_normalized_text = exactCase.corrected_text;
-    result.warnings = [];
-    result.ai_unresolved = [];
-    result.ai_complete = true;
-    result.ai_low_confidence = false;
-    result.learning_case_hit = true;
-    result.learning_case_id = exactCase.id;
-    if (!previewResult || previewResult.learning_case_id !== exactCase.id) {
-      learningStore.metrics.exactHits += 1;
-      saveLearningStore();
+    let cachedParsed = null;
+    let cacheIsConsistent = false;
+    try {
+      cachedParsed = await pyParseBet(String(exactCase.corrected_text || ""));
+      if (!isCurrentRequest()) return;
+      const saved = exactCase.snapshot || {};
+      const savedGroups = Array.isArray(saved.groups) ? saved.groups : [];
+      const parsedGroups = Array.isArray(cachedParsed.groups) ? cachedParsed.groups : [];
+      const parseWarnings = Array.isArray(cachedParsed.warnings) ? cachedParsed.warnings : [];
+      const nearlyEqual = (a, b) =>
+        Number.isFinite(Number(a)) && Number.isFinite(Number(b)) &&
+        Math.abs(Number(a) - Number(b)) < 0.0001;
+      const groupDetailsMatch = savedGroups.length === parsedGroups.length &&
+        savedGroups.every((oldGroup, index) => {
+          const newGroup = parsedGroups[index] || {};
+          return String(oldGroup.play_type || "") === String(newGroup.play_type || "") &&
+            String(oldGroup.billing_mode || "per_number") === String(newGroup.billing_mode || "per_number") &&
+            String(oldGroup.selection_text || "") === String(newGroup.selection_text || "") &&
+            nearlyEqual(oldGroup.amount, newGroup.amount) &&
+            nearlyEqual(oldGroup.total, newGroup.total) &&
+            Number(oldGroup.multiplier || 1) === Number(newGroup.multiplier || 1) &&
+            JSON.stringify(Array.isArray(oldGroup.numbers) ? oldGroup.numbers : []) ===
+              JSON.stringify(Array.isArray(newGroup.numbers) ? newGroup.numbers : []);
+        });
+      cacheIsConsistent = parsedGroups.length > 0 && parseWarnings.length === 0 &&
+        nearlyEqual(saved.total, cachedParsed.total) && groupDetailsMatch;
+    } catch (_) {
+      cacheIsConsistent = false;
     }
-    previewResult = result;
-    renderPreviewResult(result, "命中人工确认的学习案例");
-    setAiStatus("已命中已确认案例，无需重新调用 AI。添加前仍建议核对结果。", "success");
-    updateTotals();
-    return;
+
+    if (cacheIsConsistent) {
+      const result = JSON.parse(JSON.stringify(cachedParsed));
+      result.raw_text = text;
+      result.normalized_text = exactCase.corrected_text;
+      result.ai_normalized_text = exactCase.corrected_text;
+      result.warnings = [];
+      result.ai_unresolved = [];
+      result.ai_complete = true;
+      result.ai_low_confidence = false;
+      result.learning_case_hit = true;
+      result.learning_case_id = exactCase.id;
+      if (!previewResult || previewResult.learning_case_id !== exactCase.id) {
+        learningStore.metrics.exactHits += 1;
+        saveLearningStore();
+      }
+      previewResult = result;
+      renderPreviewResult(result, "命中并重新校验了已确认案例");
+      setAiStatus("已确认案例通过重新解析校验。添加前仍建议核对结果。", "success");
+      updateTotals();
+      return;
+    }
+
+    setAiStatus("发现一条旧学习案例未通过校验，已跳过旧结果，正在重新解析当前原文。", "busy");
   }
 
   try {
