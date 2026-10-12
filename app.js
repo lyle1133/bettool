@@ -1596,18 +1596,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (event.key === "Enter") {
       event.preventDefault();
       doPreview(true, true);
-    } else if (event.key.toLowerCase() === "v" && document.activeElement !== $("#raw-input")) {
-      // Do not hijack Ctrl+V / Cmd+V while the user is pasting into a form field.
-      // In particular, Worker URL and sync-token inputs must receive the native paste.
-      const target = event.target;
-      const isEditableField = target instanceof HTMLElement &&
-        (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
-      if (!isEditableField) {
-        event.preventDefault();
-        $("#raw-input").focus();
-        onPaste();
-      }
     }
+    // Intentionally do not override Ctrl+V / Cmd+V anywhere.
+    // Let the browser paste into the field the user actually selected.
+    // Use the visible "粘贴" button when clipboard-to-bet-input is desired.
   });
   $("#macau-draw").addEventListener("input", saveLocal);
   $("#hk-draw").addEventListener("input", saveLocal);
