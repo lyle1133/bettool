@@ -1597,8 +1597,16 @@ window.addEventListener("DOMContentLoaded", async () => {
       event.preventDefault();
       doPreview(true, true);
     } else if (event.key.toLowerCase() === "v" && document.activeElement !== $("#raw-input")) {
-      $("#raw-input").focus();
-      onPaste();
+      // Do not hijack Ctrl+V / Cmd+V while the user is pasting into a form field.
+      // In particular, Worker URL and sync-token inputs must receive the native paste.
+      const target = event.target;
+      const isEditableField = target instanceof HTMLElement &&
+        (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+      if (!isEditableField) {
+        event.preventDefault();
+        $("#raw-input").focus();
+        onPaste();
+      }
     }
   });
   $("#macau-draw").addEventListener("input", saveLocal);
