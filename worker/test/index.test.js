@@ -153,6 +153,22 @@ test("test Pages origin is allowed and preflight includes CORS headers", async (
   assert.equal(response.headers.get("Vary"), "Origin");
 });
 
+test("deployment-specific preview Pages origin is allowed by preflight", async () => {
+  const origin = "https://e4313645.bettool-private-learning-test.pages.dev";
+  const response = await worker.fetch(request("/api/v1/learning", {
+    method: "OPTIONS",
+    headers: {
+      Origin: origin,
+      "Access-Control-Request-Method": "PUT",
+      "Access-Control-Request-Headers": "authorization,content-type"
+    }
+  }), env);
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(response.headers.get("Access-Control-Allow-Methods") || "", /OPTIONS/);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") || "", /Authorization/i);
+});
+
 test("production Pages origin is allowed by preflight", async () => {
   const origin = "https://lyle1133.github.io";
   const response = await worker.fetch(request("/api/v1/learning", {
