@@ -291,12 +291,11 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
       </div>
     </section>
 
-    <details id="learning-details" class="disclosure">
-      <summary>
-        <div class="disclosure-title"><div class="icon-badge">🧠</div><div><strong>AI 学习与云端同步</strong><span>纠错案例、备份与多设备同步</span></div></div>
-        <span class="chevron">⌄</span>
-      </summary>
-      <div id="learning-panel" class="learning-panel">
+    <section id="learning-details" class="card">
+      <div class="panel-heading">
+        <div class="disclosure-title"><div class="icon-badge">🧠</div><div><h3>AI 学习与云端同步</h3><p>纠错案例、备份与多设备同步</p></div></div>
+      </div>
+      <div id="learning-panel" class="learning-panel" style="padding:12px 0 0">
         <div class="learning-title">AI 自我迭代 · 学习库</div>
         <div class="learning-help">先核对解析结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容单独记录为待处理样本。</div>
         <div id="learning-stats">正在加载学习库…</div>
@@ -324,7 +323,7 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
         </div>
         <div id="learning-recent" hidden></div>
       </div>
-    </details>
+    </section>
 
     <section class="card records-panel">
       <div class="records-header"><h3>已添加记录</h3><span class="count" id="records-count">0 条</span></div>
