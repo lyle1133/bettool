@@ -7,7 +7,7 @@
 - 只有持有 BETTOOL_SYNC_TOKEN 的设备才能读写云端学习库。
 - 请生成至少 32 字符、推荐 64 个十六进制字符的随机令牌；令牌只通过 Cloudflare Worker Secret 配置，不写进仓库。
 - 前端只向 HTTPS Worker 地址发送 Bearer 令牌；每个浏览器将令牌保存于本地存储。不要把令牌分享给他人。
-- ALLOWED_ORIGIN 限制浏览器来源为本项目 GitHub Pages 域名。
+- `ALLOWED_ORIGIN` 配置正式站和测试站固定域名；Worker 代码另外允许 `*.bettool-private-learning-test.pages.dev` 中仅有一层子域名的 HTTPS 预览地址，以兼容 Cloudflare Pages 每次部署生成的预览链接。其他 `pages.dev` 网站仍会被拒绝。修改 Worker 后需要从 `worker/` 目录重新部署，单独部署 Pages 前端不会更新 Worker。
 - 数据在 D1 中以版本号进行 compare-and-swap 保存。多设备同时写入时返回 409，浏览器合并新旧案例后重试。
 - 当前同步大小上限约 850 KB。上线前请先导出本地 JSON 备份。
 
