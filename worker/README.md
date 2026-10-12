@@ -15,17 +15,19 @@
 
 需要一个 Cloudflare 账户，并使用 Node.js 当前受支持版本。
 
-1. 在 Cloudflare Dashboard 的 D1 中创建数据库，名称使用 bettool-learning-sync。
-2. 记下数据库 ID，替换 wrangler.toml 内 database_id 的全零占位符。
-3. 进入本目录，安装依赖：npm install
-4. 应用迁移：npx wrangler d1 migrations apply bettool-learning-sync --remote
-5. 生成随机令牌（Node.js 命令）：
-   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-6. 将命令输出保存到密码管理器，并设置 Worker Secret：
-   npx wrangler secret put BETTOOL_SYNC_TOKEN
-   按提示粘贴令牌。不要将此值写入 .env、配置文件、截图或 Git。
-7. 测试并部署：npm test；然后 npx wrangler deploy
-8. 打开 Worker 的 /health，预期返回 JSON 中 ok=true。这只检查服务；实际同步还需要验证身份和 D1。
+1. 打开 Cloudflare Dashboard → **Workers & Pages → D1 SQL Database**，确认存在名为 bettool-learning-sync 的数据库。
+2. 打开该数据库详情页，核对数据库 ID 与 worker/wrangler.toml 中的 database_id 一致。当前配置文件已有 ID，不是全零占位符；如果数据库不存在或 ID 不匹配，请先确认账户和目标数据库，**不要随意替换现有 ID**。
+3. 在 Cloudflare Dashboard 创建 API Token，并限制在这个账户。部署需要 Workers 的编辑权限；运行 D1 迁移还需要 D1 的编辑/写入权限。
+4. 在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加以下 3 个 Repository secrets：
+   - CLOUDFLARE_ACCOUNT_ID：Cloudflare 账户 ID
+   - CLOUDFLARE_API_TOKEN：上一步创建的 API Token
+   - BETTOOL_SYNC_TOKEN：强随机令牌，至少 32 字符。可在本机 Node.js 运行：
+     node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   把同步令牌保存到密码管理器；不要写进源代码、提交、截图或聊天记录。前端设置页中也要使用同一个 BETTOOL_SYNC_TOKEN。
+5. 打开 GitHub 仓库的 Actions → **Deploy BetTool Cloud Sync Worker**，点击 Run workflow，选择分支 deploy/cloudflare-sync，并在确认框输入大写 DEPLOY。工作流会先运行 npm test，再应用 D1 迁移，最后部署 Worker 并设置 BETTOOL_SYNC_TOKEN。
+6. 在工作流运行详情的 Summary 中复制 Worker URL，再打开该 URL 后加 /health；预期返回 JSON 中 ok=true。随后再用 BetTool 页面实际测试同步。
+   
+   工作流只会在手动触发且确认框输入 DEPLOY 时执行。不要在未核对数据库 ID、账户 ID 和备份的情况下运行。
 
 ## 在 BetTool 网页配置
 
