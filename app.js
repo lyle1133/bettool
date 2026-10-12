@@ -93,7 +93,11 @@ const SYSTEM_PROMPT = `
 支持玩法和标准格式：
 A. 普通号码单注：不要添加“特码总单”前缀。
    原文“17 29 41 每个3块” -> “17 29 41各3”
-B. 特肖/各肖：例如“猴30米” -> “猴各30”；“鸡狗各肖10” -> “鸡狗各10”
+B. 特肖/各肖与生肖对应号码必须严格区分：
+   - “蛇羊狗鼠马各号30”表示这些生肖在所选年份对应的所有实际号码逐个下注，每个号码30；不能改写为“特肖/各肖”，也不能只计5组共150。按年份生肖映射展开为号码，再计算金额。
+   - 例如2026马年，蛇羊狗鼠马对应21个号码，每个30，总额630。不要把生肖名本身当成下注组。
+   - 只有原文明确写“蛇羊狗鼠马各肖30”或“特肖蛇羊狗鼠马各30”，才按每个生肖一注处理（5组，每组30）。
+   - 若只写生肖和金额且没有“各号/各肖/特肖”等明确提示，不确定时应放入 unresolved，不要猜。
 C. 平特一肖：例如“平特鸡200块” -> “平特一肖：鸡 200”
 D. 连肖：必须使用阿拉伯数字 2/3/4/5，例如“四连虎鸡牛狗10块” -> “4连肖：虎鸡牛狗 10”
 E. 五不中/六不中/七不中：例如“04.06.05.11.12 五不中 200文” -> “04 06 05 11 12 五不中 200”
@@ -499,6 +503,15 @@ function isSevereWarning(w) {
   return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
 }
 
+function hasExplicitZodiacEachNumberSyntax(text) {
+  const animals = "鼠牛虎兔龙蛇马羊猴鸡狗猪";
+  return String(text || "").split(/\r?\n/).some(line => {
+    const normalized = line.replace(/[\s,，、。.;；:：]/g, "");
+    const pattern = new RegExp("[" + animals + "]{1,12}各号(?:[0-9零〇一二两三四五六七八九十百千万])");
+    return pattern.test(normalized);
+  });
+}
+
 async function doPreview(allowAI = false, forceAI = false) {
   const requestId = ++previewRequestId;
   if (!coreReady) return;
@@ -515,8 +528,9 @@ async function doPreview(allowAI = false, forceAI = false) {
     requestId === previewRequestId && $("#raw-input").value.trim() === text;
 
   // 命中人工确认过的完全相同原文时，直接复用已确认结构化结果，不再让模型重新猜。
+  const strictZodiacNumberRule = hasExplicitZodiacEachNumberSyntax(text);
   const exactCase = findExactLearningCase(text);
-  if (exactCase) {
+  if (exactCase && !strictZodiacNumberRule) {
     const result = JSON.parse(JSON.stringify(exactCase.snapshot));
     result.raw_text = text;
     result.normalized_text = exactCase.corrected_text;
@@ -548,6 +562,18 @@ async function doPreview(allowAI = false, forceAI = false) {
     const warnings = Array.isArray(localResult.warnings) ? localResult.warnings : [];
     const localEmpty = groups.length === 0;
     const severe = warnings.some(isSevereWarning);
+
+    // “生肖+各号金额”语义明确，按本地生肖表展开为具体号码；
+    // 不让 AI 改写成“各肖/特肖”，以免按生肖数计价而少算金额。
+    if (strictZodiacNumberRule && !localEmpty && !warnings.length) {
+      previewResult = localResult;
+      $("#preview-box").textContent = localResult.content || "（无有效内容）";
+      setPreviewBadge("规则解析", "success");
+      setAiStatus("已识别“生肖+各号”：按对应的实际号码逐号计额，不按“各肖/特肖”计价。", "success");
+      updateTotals();
+      return;
+    }
+
     const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || localEmpty || severe);
 
     if (!needAI) {
