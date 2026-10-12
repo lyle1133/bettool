@@ -41,6 +41,26 @@ class CoreParserRegressionTests(unittest.TestCase):
         self.assertFalse(parsed.groups)
         self.assertTrue(any("金额" in warning for warning in parsed.warnings), parsed.warnings)
 
+    def test_prefixed_five_zodiac_combination_counts_per_combination_amount(self):
+        parsed = parse_bet(
+            "复试五连 牛马猴猪虎蛇组合二十\n"
+            "三连猪蛇牛五十\n"
+            "四连牛马狗猴 五十\n"
+            "五连牛马狗蛇虎五十"
+        )
+        self.assertEqual(len(parsed.groups), 4, parsed.warnings)
+        first = parsed.groups[0]
+        self.assertEqual(first.play_type, "5连肖复试")
+        self.assertEqual(first.selection_text, "牛,马,猴,猪,虎,蛇")
+        self.assertEqual(first.multiplier, 6)
+        self.assertEqual(first.amount, 20)
+        self.assertEqual(first.total, 120)
+        self.assertEqual([g.play_type for g in parsed.groups[1:]],
+                         ["3连肖", "4连肖", "5连肖"])
+        self.assertEqual([g.total for g in parsed.groups[1:]], [50, 50, 50])
+        self.assertEqual(parsed.total, 270)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
     def test_mixed_input_preserves_original_bet_order(self):
         parsed = parse_bet(
             "17各3\n"
