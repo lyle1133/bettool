@@ -10,16 +10,16 @@
 <title>BetTool · 押注解析与统计</title>
 <style>
 :root{
-  color-scheme:dark;
-  --bg:#0b0d12;--panel:#141821;--panel-raised:#1a202b;--panel-soft:#202735;
-  --accent:#4285f4;--accent-hover:#5895fb;--text:#f2f4f8;--muted:#a2aabb;
-  --subtle:#717c90;--border:#2a3241;--success:#55d99b;--warning:#ffd166;--danger:#ff7777;
-  --radius:16px;--radius-sm:11px;--shadow:0 14px 38px rgba(0,0,0,.16);
+  color-scheme:light;
+  --bg:#F9FAFB;--panel:#FFFFFF;--panel-raised:#FFFFFF;--panel-soft:#F3F4F6;
+  --accent:#2563EB;--accent-hover:#1D4ED8;--text:#1F2937;--muted:#6B7280;
+  --subtle:#6B7280;--border:#E5E7EB;--success:#10B981;--warning:#F59E0B;--danger:#EF4444;
+  --radius:12px;--radius-sm:6px;--shadow:0 8px 24px rgba(31,41,55,.06);
   --safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:16px;-webkit-text-size-adjust:100%;overflow:hidden}
-body{display:flex;flex-direction:column;height:100dvh;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);background:radial-gradient(ellipse at 50% -20%,rgba(66,133,244,.10),transparent 48%),var(--bg)}
+body{display:flex;flex-direction:column;height:100dvh;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);background:var(--bg)}
 button,input,textarea,select{font:inherit}
 button{border:1px solid transparent;cursor:pointer;min-height:44px;padding:11px 14px;border-radius:var(--radius-sm);font-size:14px;font-weight:650;color:var(--text);background:var(--panel-soft);transition:background .15s,border-color .15s,transform .15s}
 button:hover{border-color:#3c465a}
@@ -453,7 +453,7 @@ input,textarea,select { background:#fff; color:#1F2937; border-color:#E5E7EB; }
   <button data-tab="settings" onclick="switchTab('settings')">设置</button>
 </nav>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=14"></script>
-<script src="learning.js?v=3"></script>
+<script src="app.js?v=15"></script>
+<script src="learning.js?v=4"></script>
 </body>
 </html>
