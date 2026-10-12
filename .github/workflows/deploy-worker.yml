@@ -52,6 +52,27 @@ jobs:
         working-directory: worker
         run: npm test
 
+      - name: Verify D1 database ID and name before migration
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          D1_ID="$(sed -nE 's/^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"([^"]+)".*/\\1/p' worker/wrangler.toml | head -n 1)"
+          [[ -n "$D1_ID" ]] || { echo "::error::database_id was not found in worker/wrangler.toml"; exit 1; }
+          RESPONSE="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_ID")"
+          SUCCESS="$(printf '%s' "$RESPONSE" | jq -r '.success // false')"
+          ACTUAL_ID="$(printf '%s' "$RESPONSE" | jq -r '.result.uuid // .result.id // empty')"
+          ACTUAL_NAME="$(printf '%s' "$RESPONSE" | jq -r '.result.name // empty')"
+          [[ "$SUCCESS" == "true" && "$ACTUAL_ID" == "$D1_ID" && "$ACTUAL_NAME" == "bettool-learning-sync" ]] || {
+            echo "::error::The configured D1 ID could not be verified as bettool-learning-sync in this Cloudflare account. No migration was applied."
+            exit 1
+          }
+          echo "Verified the target D1 database name and ID."
+
       - name: Apply D1 migrations
         uses: cloudflare/wrangler-action@v4
         with:
