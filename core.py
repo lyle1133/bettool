@@ -923,6 +923,19 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     def _choose_value(text: str) -> int:
         return _cn_or_digit_to_int(text)
 
+    # ===== 6.5 复式/复试五连等前置格式，金额按每组计算 =====
+    # 例如“复试五连 牛马猴猪虎蛇组合二十”：
+    # 从 6 个生肖中取 5 个，组合数 C(6,5)=6，每组 20，总额 120。
+    # 必须优先于通用生肖/号码解析，避免把每个生肖映射成普通号码组。
+    m = re.fullmatch(
+        rf"(?:复试|复式)([二两三四五]|[2-5])连(?:肖)?"
+        rf"([鼠牛虎兔龙蛇马羊猴鸡狗猪]{{2,12}})"
+        rf"(?:生肖)?(?:组合|复试组合|复式组合)?"
+        rf"(?:各组|每组|组|各)?{amount_re}{suffix_re}",
+        combo_text)
+    if m:
+        return make_lianxiao(m.group(2), m.group(1), m.group(3))
+
     # ===== 6. 平特一肖多肖（前置）：平特一肖:狗兔,各300 =====
     _seg_pf = segment.replace("免", "兔")
     _seg_pf = re.sub(r"^[\s。.;；,，、：:]+", "", _seg_pf)
