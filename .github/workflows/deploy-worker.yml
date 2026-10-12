@@ -59,7 +59,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          D1_ID="$(sed -nE 's/^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"([^"]+)".*/\\1/p' worker/wrangler.toml | head -n 1)"
+          D1_ID="$(grep -E '^[[:space:]]*database_id[[:space:]]*=' worker/wrangler.toml | head -n 1 | cut -d '"' -f 2)"
           [[ -n "$D1_ID" ]] || { echo "::error::database_id was not found in worker/wrangler.toml"; exit 1; }
           RESPONSE="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
