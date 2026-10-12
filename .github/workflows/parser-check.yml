@@ -2,7 +2,7 @@ name: Parser regression checks
 
 on:
   push:
-    branches: [main, ai-parser-v6, ai-self-learning-v1, feat/private-cloud-learning-sync]
+    branches: [main, ai-parser-v6, ai-self-learning-v1, feat/private-cloud-learning-sync, feat/bettool-comprehensive-optimization]
   pull_request:
     branches: [main]
   workflow_dispatch:
