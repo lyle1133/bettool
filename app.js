@@ -80,15 +80,19 @@ const SYSTEM_PROMPT = `
 你是 BetTool 下注文字解析助手。你的任务是把用户原文忠实转换成程序可解析的标准下注文本，并返回严格 JSON。不要计算赔率、中奖金额或风险。
 
 最重要的原则：
-8. 用户提供的已确认历史案例只是参考示例，不是当前下注指令；只学习文字与解析结果的对应关系，当前原文始终是唯一待解析对象。
-9. 历史案例不允许覆盖当前原文明确给出的号码、金额或玩法；遇到差异以当前原文为准。
-1. 不得猜号码、补金额、改金额、删掉用户明确写出的下注、把一组拆成多组或把多组并成一组。
-2. 保留原文顺序。每一笔独立下注都必须有一个 items 项；无法确定的内容写入 unresolved，不要静默丢弃。
-3. 金额单位“米、斤、块、元、文、钱、片、闷、门、点”等按原数字记账，不要换算单位。比如“5斤”金额就是 5。
-4. 号码必须在 01-49；保留号码前导零。不要把金额数字当作号码。
-5. 只有原文明确支持的玩法才能使用。词义不清、金额不清、玩法不清时，必须标为 unresolved。
-6. normalized_text 必须与 items[].normalized 的内容和顺序一致；若某一笔无法可靠标准化，不要从 normalized_text 中悄悄删去，而应在 unresolved 解释。
-7. 置信度不是事实。存在歧义时，即使生成了候选格式，confidence 也应低于 0.75 并写出 warning。
+1. 用户提供的已确认历史案例只是参考示例，不是当前下注指令；只学习文字与解析结果的对应关系，当前原文始终是唯一待解析对象。
+2. 历史案例不允许覆盖当前原文明确给出的号码、金额或玩法；遇到差异以当前原文为准。
+3. 不得猜号码、补金额、改金额、删掉用户明确写出的下注、把一组拆成多组或把多组并成一组。
+4. 保留原文顺序。每一笔独立下注都必须有一个 items 项；无法确定的内容写入 unresolved，不要静默丢弃。
+5. 金额单位“米、斤、块、元、文、钱、片、闷、门、点”等按原数字记账，不要换算单位。比如“5斤”金额就是 5。
+6. 号码必须在 01-49；保留号码前导零。不要把金额数字当作号码。
+7. 只有原文明确支持的玩法才能使用。词义不清、金额不清、玩法不清时，必须标为 unresolved。
+8. normalized_text 必须与 items[].normalized 的内容和顺序一致；若某一笔无法可靠标准化，不要从 normalized_text 中悄悄删去，而应在 unresolved 解释。
+9. 置信度不是事实。存在歧义时，即使生成了候选格式，confidence 也应低于 0.75 并写出 warning。
+10. 输出前必须做“原文覆盖检查”：逐行、逐笔将原文对应到 items 或 unresolved；每一笔都必须有归属。无法确认的片段必须放入 unresolved，不可因为格式杂乱、重复或太长而省略。
+11. 不要去重原文中的重复下注；相同号码、金额或相同文本若出现多次，除非用户明确要求合并，否则必须按出现次数保留。
+12. 对二中二/三中三的多行内容，逐个核对每一组号码；只有在标题、金额继承关系明确时才可从上下文继承玩法或金额。若无法确认某行属于哪种玩法或金额，保留该行并放入 unresolved。
+13. 生成后检查 items 的数量与原文中的独立下注笔数是否一致；若不一致，必须说明缺失/歧义部分，不得声称完整成功。
 
 支持玩法和标准格式：
 A. 普通号码单注：不要添加“特码总单”前缀。
@@ -363,23 +367,221 @@ async function pyRiskRows() {
     JSON.stringify(state.rebate)));
 }
 
-// ==================== AI 调用（直连 Groq） ====================
-async function callBetToolAI(text, similarCases = []) {
-  if (!text || !text.trim()) return null;
+// ==================== 预览展示与 AI 调用 ====================
+function setAiStatus(message, state) {
+  const node = $("#ai-status");
+  if (node) {
+    node.textContent = String(message || "");
+    node.dataset.state = state || "idle";
+  }
+  const button = $("#btn-ai-parse");
+  if (button) button.disabled = state === "busy";
+}
 
+function escapeHtml(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function setPreviewBadge(text, kind) {
+  const badge = $("#preview-state");
+  if (!badge) return;
+  badge.textContent = text;
+  badge.className = "badge" + (kind ? " " + kind : "");
+}
+
+function renderPreviewEmpty(message) {
+  const box = $("#preview-box");
+  if (box) {
+    box.className = "preview-box";
+    box.innerHTML = '<div class="preview-placeholder">' + escapeHtml(message || "等待输入下注内容。解析完成后会在这里逐组显示结果。") + "</div>";
+  }
+  setPreviewBadge("等待输入", "");
+}
+
+function renderPreviewResult(result, sourceLabel) {
+  const box = $("#preview-box");
+  if (!box) return;
+  const groups = Array.isArray(result && result.groups) ? result.groups : [];
+  const warnings = Array.isArray(result && result.warnings) ? result.warnings : [];
+  const unresolved = Array.isArray(result && result.ai_unresolved) ? result.ai_unresolved : [];
+  const needsCheck = warnings.length > 0 || unresolved.length > 0 ||
+    result.ai_complete === false || result.ai_low_confidence === true;
+  const source = sourceLabel || (result.ai ? "AI 解析结果" : "本地规则结果");
+  setPreviewBadge(needsCheck ? "请核对" : "已生成预览", needsCheck ? "warning" : "success");
+
+  const groupHtml = groups.map(function(group, index) {
+    const type = group.play_type || group.label || "下注项目";
+    const selection = group.selection_text || group.source ||
+      (Array.isArray(group.numbers) && group.numbers.length ? group.numbers.join(" · ") : "") ||
+      group.label || "未提供号码文本";
+    const amount = group.amount === null || group.amount === undefined ? "—" : fmtNum(group.amount);
+    const subtotal = group.total === null || group.total === undefined ? "—" : fmtNum(group.total);
+    const multiplier = group.multiplier === null || group.multiplier === undefined ? "—" : String(group.multiplier);
+    return '<article class="parsed-group-card">' +
+      '<div class="group-head"><strong>' + escapeHtml(type) + '</strong><span>第 ' + (index + 1) + ' 组</span></div>' +
+      '<div class="group-selection">' + escapeHtml(selection) + '</div>' +
+      '<div class="group-meta">' +
+        '<div><span>单组金额</span><strong>' + escapeHtml(amount) + '</strong></div>' +
+        '<div><span>小计</span><strong>' + escapeHtml(subtotal) + '</strong></div>' +
+        '<div><span>组合/倍数</span><strong>' + escapeHtml(multiplier) + '</strong></div>' +
+      '</div></article>';
+  }).join("");
+
+  const warningItems = warnings.map(function(item) {
+    return '<div class="preview-warning">' + escapeHtml(item) + '</div>';
+  });
+  unresolved.forEach(function(item) {
+    warningItems.push('<div class="preview-warning">未能确定：' +
+      escapeHtml(typeof item === "string" ? item : JSON.stringify(item)) + "</div>");
+  });
+  if (result.ai_chunk_count > 1) {
+    warningItems.push('<div class="preview-warning">长文本已按原文顺序分段解析，共 ' +
+      Number(result.ai_chunk_count) + ' 段。请特别核对分段处的玩法、号码组和金额。</div>');
+  }
+  const normalized = result.content || result.ai_normalized_text || result.normalized_text || "";
+  const stats = '<div class="preview-stats">' +
+    '<div class="preview-stat"><span>识别分组</span><strong>' + groups.length + '</strong></div>' +
+    '<div class="preview-stat total"><span>预览总金额</span><strong>' + escapeHtml(fmtNum(result.total || 0)) + '</strong></div>' +
+    '</div>';
+  const cards = groups.length
+    ? '<div class="parsed-group-list">' + groupHtml + '</div>'
+    : '<div class="preview-placeholder">当前结果没有可展示的有效分组。请检查原文或使用 AI 辅助解析。</div>';
+  const warningBlock = warningItems.length
+    ? '<div class="preview-warnings">' + warningItems.join("") + '</div>' : "";
+  const textBlock = normalized
+    ? '<details class="standard-text"><summary>查看完整标准化文本</summary><pre>' + escapeHtml(normalized) + '</pre></details>' : "";
+
+  box.className = "preview-box";
+  box.innerHTML = '<div class="field-help">' + escapeHtml(source) + '</div>' + stats + cards + warningBlock + textBlock;
+}
+
+function aiErrorPresentation(error) {
+  const message = String(error && error.message || error || "");
+  const isTpm = !!(error && error.aiTpmLimit) ||
+    /tokens per minute|\bTPM\b|rate_limit_exceeded|request too large/i.test(message);
+  if (isTpm) {
+    return {
+      title: "AI 请求超过当前每分钟 Token 限额",
+      message: "本地解析结果已保留。系统会先尝试缩短提示内容；如果仍然太长，可以把原文拆成较小批次重试。长文本分段可能需要等待额度恢复。",
+      isTpm: true
+    };
+  }
+  if (/401|invalid_api_key|unauthorized/i.test(message)) {
+    return {
+      title: "Groq API Key 未通过验证",
+      message: "请在「设置」中检查 API Key 是否完整、仍然有效；不要把密钥发送给他人。",
+      isTpm: false
+    };
+  }
+  if (/429|rate.?limit|too many requests/i.test(message)) {
+    return {
+      title: "AI 服务暂时繁忙",
+      message: "当前请求触发了服务频率限制。保留现有解析结果，稍后再试。",
+      isTpm: false
+    };
+  }
+  if (/Failed to fetch|Load failed|NetworkError|网络|fetch/i.test(message)) {
+    return {
+      title: "网络连接失败",
+      message: "浏览器暂时无法连接 AI 服务。请检查网络或代理；本地解析结果没有清除。",
+      isTpm: false
+    };
+  }
+  return {
+    title: "AI 解析没有完成",
+    message: "本地结果仍保留。你可以查看技术详情，确认后重试或手动拆分输入。",
+    isTpm: false
+  };
+}
+
+function renderAiFailure(error, localResult) {
+  if (localResult && Array.isArray(localResult.groups) && localResult.groups.length) {
+    renderPreviewResult(localResult, "本地规则解析结果（AI 未完成）");
+  } else {
+    renderPreviewEmpty("AI 未能完成解析。原始输入仍在输入框中，可以检查后重试。");
+    setPreviewBadge("AI 未完成", "danger");
+  }
+  const box = $("#preview-box");
+  if (!box) return;
+  const info = aiErrorPresentation(error);
+  const panel = document.createElement("div");
+  panel.className = "ai-error-card";
+  panel.innerHTML = '<strong>' + escapeHtml(info.title) + '</strong><p>' +
+    escapeHtml(info.message) + '</p><div class="ai-error-actions"></div>' +
+    '<div class="ai-technical"><details><summary>查看技术详情</summary><pre>' +
+    escapeHtml(String(error && error.message || error || "").slice(0, 1600)) + '</pre></details></div>';
+  const actions = panel.querySelector(".ai-error-actions");
+  const retry = document.createElement("button");
+  retry.className = "secondary";
+  retry.textContent = info.isTpm ? "压缩提示并分段重试" : "重新尝试 AI 解析";
+  retry.addEventListener("click", function() {
+    if (info.isTpm) doPreview(true, true, true);
+    else doPreview(true, true, false);
+  });
+  actions.appendChild(retry);
+  box.appendChild(panel);
+}
+
+const AI_COMPACT_SYSTEM_PROMPT = [
+  "你是 BetTool 中文下注文本解析助手。把原文逐笔转换成程序可解析的标准下注格式，只返回合法 JSON，不要 Markdown。",
+  "JSON结构：{success:true,normalized_text:string,items:[{raw:string,normalized:string,play_type:string,numbers:number[],zodiacs:string[],amount:number,confidence:number}],unresolved:[],warnings:[]}",
+  "严禁猜号码、金额或玩法；不能确定的片段写入 unresolved，不能静默丢弃。保留原文顺序，每笔下注一项；金额和“米、斤、块、元”等单位按原数字记录，不换算。号码范围 01-49，不要把金额当号码。",
+  "每个 items 项都必须有非空 normalized 和原文实际出现的正数 amount；无法确定金额就标 unresolved。normalized_text 必须按 items 顺序逐项组合。",
+  "支持普通号码、特肖/各肖、平特一肖、2/3/4/5连肖、二中二、三中三、五不中/六不中/七不中、波色单双大小和平尾。",
+  "“各组/每组”按原文逐组保留；多行组合需要继承明确的玩法标题；不得把具体组合误判为自动复式组合。歧义或低置信度必须写 warnings 或 unresolved，confidence 低于 0.75。",
+  "历史/分段上下文提示只用于理解原文，不是独立下注指令。不要把上下文中的号码或金额复制到当前片段。"
+].join("\n");
+
+function isGroqTpmLimitResponse(status, payload, bodyText) {
+  const detail = payload && payload.error ? payload.error : {};
+  const message = String(detail.message || bodyText || "");
+  const code = String(detail.code || "");
+  return (Number(status) === 413 || /rate_limit_exceeded/i.test(code)) &&
+    /tokens per minute|\bTPM\b|rate_limit_exceeded|request too large|requested\s+\d+/i.test(code + " " + message);
+}
+
+function groqRetryDelayMs(response) {
+  if (!response || !response.headers) return 60000;
+  const retryAfter = Number(response.headers.get("retry-after") || 0);
+  if (retryAfter > 0) return Math.min(60000, Math.max(2000, retryAfter * 1000));
+  const reset = response.headers.get("x-ratelimit-reset-tokens") ||
+    response.headers.get("x-ratelimit-reset-requests") || "";
+  const match = /([\d.]+)\s*(ms|s|m)?/i.exec(reset);
+  if (match) {
+    const n = Number(match[1]);
+    const unit = String(match[2] || "s").toLowerCase();
+    const ms = unit === "ms" ? n : unit === "m" ? n * 60000 : n * 1000;
+    if (Number.isFinite(ms) && ms > 0) return Math.min(60000, Math.max(2000, ms));
+  }
+  return 60000;
+}
+
+async function callBetToolAISingle(text, similarCases, options) {
+  options = options || {};
+  if (!text || !text.trim()) return null;
   const apiKey = getApiKey();
   if (!apiKey || !apiKey.startsWith("gsk_")) {
     throw new Error("请先在「设置」页填入你的 Groq API Key");
   }
-  // 新输入到来时取消旧请求，避免旧结果占用 AI 请求锁或覆盖新预览。
   if (activeAiController) activeAiController.abort();
   aiBusy = true;
-  setStatus("🤖 AI正在解析…");
+  setStatus("🤖 AI 正在解析…");
+  setAiStatus(options.partNumber
+    ? "AI 分段解析中（" + options.partNumber + "/" + options.totalParts + "）…"
+    : "AI 正在解析；已保留本地结果。", "busy");
   const controller = new AbortController();
   activeAiController = controller;
   const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
+    const userMessage = typeof buildAiUserMessage === "function"
+      ? buildAiUserMessage(text, options.compact ? [] : (similarCases || []), options)
+      : "请逐笔解析以下下注原文，只返回 JSON：\n" + text;
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -390,8 +592,8 @@ async function callBetToolAI(text, similarCases = []) {
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildAiUserMessage(text, similarCases) }
+          { role: "system", content: options.compact ? AI_COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT },
+          { role: "user", content: userMessage }
         ],
         temperature: 0,
         response_format: { type: "json_object" }
@@ -400,15 +602,23 @@ async function callBetToolAI(text, similarCases = []) {
 
     const responseText = await response.text();
     if (!response.ok) {
-      throw new Error("Groq API " + response.status + ": " + responseText.slice(0, 800));
+      let errorPayload = {};
+      try { errorPayload = JSON.parse(responseText); } catch (_) {}
+      const detail = errorPayload && errorPayload.error ? errorPayload.error : {};
+      const message = String(detail.message || responseText || "未知错误");
+      const limited = isGroqTpmLimitResponse(response.status, errorPayload, responseText);
+      const apiError = new Error(limited
+        ? "Groq 当前每分钟 Token 限额不足：" + message.slice(0, 550)
+        : "Groq API " + response.status + "：" + message.slice(0, 800));
+      apiError.aiTpmLimit = limited;
+      apiError.httpStatus = response.status;
+      apiError.retryAfterMs = groqRetryDelayMs(response);
+      throw apiError;
     }
 
     let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      throw new Error("Groq API 响应不是有效 JSON");
-    }
+    try { data = JSON.parse(responseText); }
+    catch (_) { throw new Error("Groq API 响应不是有效 JSON"); }
 
     const textOutput = data && data.choices && data.choices[0] &&
       data.choices[0].message && data.choices[0].message.content
@@ -416,30 +626,24 @@ async function callBetToolAI(text, similarCases = []) {
     if (!textOutput) throw new Error("Groq 没有返回有效解析结果");
 
     let ai;
-    try {
-      ai = JSON.parse(textOutput);
-    } catch (e) {
+    try { ai = JSON.parse(textOutput); }
+    catch (_) {
       const first = textOutput.indexOf("{");
       const last = textOutput.lastIndexOf("}");
       if (first < 0 || last <= first) {
         throw new Error("Groq 返回内容无法解析为 JSON：" + textOutput.slice(0, 500));
       }
-      try {
-        ai = JSON.parse(textOutput.slice(first, last + 1));
-      } catch (_) {
-        throw new Error("Groq 返回的 JSON 格式不完整：" + textOutput.slice(0, 500));
-      }
+      try { ai = JSON.parse(textOutput.slice(first, last + 1)); }
+      catch (_) { throw new Error("Groq 返回的 JSON 格式不完整：" + textOutput.slice(0, 500)); }
     }
-
     if (!ai || typeof ai !== "object" || Array.isArray(ai)) {
-      throw new Error("AI结果格式错误：最外层必须是 JSON 对象");
+      throw new Error("AI 结果格式错误：最外层必须是 JSON 对象");
     }
 
     const items = Array.isArray(ai.items) ? ai.items : [];
     const lowConfidence = items.length === 0 || items.some(
       item => !item || Number(item.confidence || 0) < AI_MIN_CONFIDENCE
     );
-
     const parsed = await pyParseAIResult(ai);
     parsed.ai = true;
     parsed.ai_raw = ai;
@@ -451,21 +655,202 @@ async function callBetToolAI(text, similarCases = []) {
     parsed.ai_complete = parsed.ai_complete === true &&
       !lowConfidence && parsed.ai_unresolved.length === 0;
     parsed.raw_text = text;
+    parsed.ai_prompt_compacted = !!options.compact;
     return parsed;
   } catch (error) {
-    if (error && error.name === "AbortError") {
-      throw new Error("AI请求超时（45秒），请稍后重试");
-    }
+    if (error && error.name === "AbortError") throw new Error("AI 请求超时（45 秒），请稍后重试");
     throw error;
   } finally {
     clearTimeout(timeoutId);
     if (activeAiController === controller) {
       activeAiController = null;
       aiBusy = false;
-      setStatus("🟢 本地解析 + AI");
+      setStatus("就绪");
+      if (!$("#ai-status") || $("#ai-status").dataset.state === "busy") {
+        setAiStatus("AI 请求阶段结束。", "idle");
+      }
     }
   }
 }
+
+function extractAiPlayContext(line) {
+  const text = String(line || "").trim().replace(/[：:]+$/g, "");
+  if (!text || text.length > 22) return "";
+  const heading = /^(?:(?:平码)?复式\s*)?(?:二中二|三中三|五不中|六不中|七不中|六肖中|二连肖|三连肖|四连肖|五连肖|[2-5]连肖|平特一肖|平特尾|各肖|特肖|波色|特码)(?:复式)?$/;
+  return heading.test(text) ? text : "";
+}
+
+function splitLongAiLine(line, maxChars) {
+  const parts = [];
+  let rest = String(line);
+  while (rest.length > maxChars) {
+    const floor = Math.floor(maxChars * 0.58);
+    const delimiters = ["，", ",", "；", ";", "、", "/", " "];
+    let cut = -1;
+    for (const delimiter of delimiters) {
+      const index = rest.lastIndexOf(delimiter, maxChars - 1);
+      if (index >= floor && index > cut) cut = index;
+    }
+    if (cut < 0) cut = maxChars - 1;
+    const end = cut + 1;
+    parts.push(rest.slice(0, end));
+    rest = rest.slice(end);
+  }
+  parts.push(rest);
+  return parts;
+}
+
+function splitAiTextIntoChunks(text, maxChars) {
+  const limit = Math.max(300, Number(maxChars) || 2600);
+  const sourceLines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = [];
+  for (const line of sourceLines) {
+    if (line.length > limit) lines.push.apply(lines, splitLongAiLine(line, limit));
+    else lines.push(line);
+  }
+  const chunks = [];
+  let buffer = [];
+  let bufferLength = 0;
+  let activeContext = "";
+  let bufferContext = "";
+  for (const line of lines) {
+    const lineLength = line.length + (buffer.length ? 1 : 0);
+    if (buffer.length && bufferLength + lineLength > limit) {
+      chunks.push({ text: buffer.join("\n"), context: bufferContext });
+      buffer = [];
+      bufferLength = 0;
+      bufferContext = activeContext;
+    }
+    buffer.push(line);
+    bufferLength += line.length + (buffer.length > 1 ? 1 : 0);
+    const detected = extractAiPlayContext(line);
+    if (detected) activeContext = detected;
+  }
+  if (buffer.length || !chunks.length) chunks.push({ text: buffer.join("\n"), context: bufferContext });
+  return chunks;
+}
+
+function mergeAiChunkResults(fullText, results) {
+  const groups = [];
+  const warnings = [];
+  const unresolved = [];
+  const items = [];
+  for (const result of results) {
+    if (Array.isArray(result.groups)) groups.push.apply(groups, result.groups);
+    if (Array.isArray(result.warnings)) warnings.push.apply(warnings, result.warnings);
+    if (Array.isArray(result.ai_unresolved)) unresolved.push.apply(unresolved, result.ai_unresolved);
+    else if (Array.isArray(result.unresolved)) unresolved.push.apply(unresolved, result.unresolved);
+    if (result.ai_raw && Array.isArray(result.ai_raw.items)) items.push.apply(items, result.ai_raw.items);
+  }
+  const content = results.map(result => String(result.content || "")).filter(Boolean).join("\n");
+  const normalized = results.map(result => String(result.ai_normalized_text || result.normalized_text || ""))
+    .filter(Boolean).join("\n");
+  warnings.push("原文已按顺序分成 " + results.length + " 段解析。请特别核对分段处的玩法标题、金额和组合是否完整。");
+  const uniqueWarnings = Array.from(new Set(warnings.map(String)));
+  const total = groups.reduce((sum, group) => sum + (Number(group.total) || 0), 0);
+  return {
+    ...results[0],
+    raw_text: fullText,
+    content: content,
+    total: total,
+    groups: groups,
+    warnings: uniqueWarnings,
+    unresolved: unresolved,
+    ai: true,
+    ai_raw: { success: results.every(result => result.ai_raw && result.ai_raw.success !== false),
+      normalized_text: normalized, items: items, unresolved: unresolved, warnings: uniqueWarnings },
+    ai_normalized_text: normalized,
+    normalized_text: normalized,
+    ai_unresolved: unresolved,
+    ai_low_confidence: results.some(result => result.ai_low_confidence === true),
+    ai_complete: results.every(result => result.ai_complete === true) && unresolved.length === 0,
+    ai_chunk_count: results.length
+  };
+}
+
+async function callBetToolAIChunked(text, options) {
+  options = options || {};
+  const chunks = splitAiTextIntoChunks(text, options.small ? 1200 : 2600);
+  if (chunks.length === 1) {
+    try {
+      const single = await callBetToolAISingle(chunks[0].text, [], {
+        compact: true, chunkContext: chunks[0].context
+      });
+      single.ai_prompt_compacted = true;
+      return single;
+    } catch (error) {
+      if (!error || !error.aiTpmLimit) throw error;
+      const waitMs = Math.max(5000, Math.min(60000, Number(error.retryAfterMs) || 60000));
+      setAiStatus("AI 每分钟额度暂时不足，约等待 " + Math.ceil(waitMs / 1000) +
+        " 秒后自动重试。请保持页面打开。", "busy");
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      const single = await callBetToolAISingle(chunks[0].text, [], {
+        compact: true, chunkContext: chunks[0].context
+      });
+      single.ai_prompt_compacted = true;
+      return single;
+    }
+  }
+  if (chunks.length > 18) {
+    throw new Error("这段内容太长，需要拆成更多批次。请按玩法区块分成几次输入，以免超过 AI 每分钟额度。");
+  }
+
+  const results = [];
+  for (let index = 0; index < chunks.length; index++) {
+    const chunk = chunks[index];
+    setAiStatus("长文本分段解析中（" + (index + 1) + "/" + chunks.length + "），正在保留原文顺序…", "busy");
+    const requestOptions = {
+      compact: true,
+      chunkContext: chunk.context,
+      partNumber: index + 1,
+      totalParts: chunks.length
+    };
+    let result;
+    try {
+      result = await callBetToolAISingle(chunk.text, [], requestOptions);
+    } catch (error) {
+      if (!error || !error.aiTpmLimit) throw error;
+      const waitMs = Math.max(5000, Math.min(60000, Number(error.retryAfterMs) || 60000));
+      setAiStatus("AI 每分钟额度暂时不足，约等待 " + Math.ceil(waitMs / 1000) +
+        " 秒后继续第 " + (index + 1) + "/" + chunks.length + " 段。请保持页面打开。", "busy");
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      result = await callBetToolAISingle(chunk.text, [], requestOptions);
+    }
+    results.push(result);
+  }
+  return mergeAiChunkResults(text, results);
+}
+
+async function callBetToolAI(text, similarCases, options) {
+  options = options || {};
+  if (!text || !text.trim()) return null;
+  const apiKey = getApiKey();
+  if (!apiKey || !apiKey.startsWith("gsk_")) {
+    throw new Error("请先在「设置」页填入你的 Groq API Key");
+  }
+  if (options.forceChunking) {
+    setAiStatus("正在使用精简提示词分段处理长文本…", "busy");
+    return callBetToolAIChunked(text, { small: true });
+  }
+  try {
+    return await callBetToolAISingle(text, similarCases || [], { compact: false });
+  } catch (firstError) {
+    if (!firstError || !firstError.aiTpmLimit) throw firstError;
+    setAiStatus("请求接近 AI 每分钟 Token 限额，正在移除历史示例并缩短提示词后重试…", "busy");
+    try {
+      const compactResult = await callBetToolAISingle(text, [], { compact: true });
+      compactResult.warnings = (Array.isArray(compactResult.warnings) ? compactResult.warnings : [])
+        .concat("为适应当前 AI 服务额度，系统使用精简提示词重试。请逐项核对玩法、号码、金额和组数。");
+      compactResult.ai_prompt_compacted = true;
+      return compactResult;
+    } catch (compactError) {
+      if (!compactError || !compactError.aiTpmLimit) throw compactError;
+      setAiStatus("精简请求仍超出限额，准备按原文分段处理…", "busy");
+      return callBetToolAIChunked(text, { small: false });
+    }
+  }
+}
+
 // ==================== 用户 & 筛选 ====================
 function switchUser(u) {
   state.currentUser = u;
@@ -499,14 +884,15 @@ function isSevereWarning(w) {
   return /无法|未识别|没有|错误|失败|不足|跳过|超出|不合法|没有生成|没有找到金额/.test(String(w || ""));
 }
 
-async function doPreview(allowAI = false, forceAI = false) {
+async function doPreview(allowAI = false, forceAI = false, forceChunks = false) {
   const requestId = ++previewRequestId;
   if (!coreReady) return;
 
   const text = $("#raw-input").value.trim();
   if (!text) {
     previewResult = null;
-    $("#preview-box").textContent = "（等待输入）";
+    renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
+    setAiStatus("输入内容后会先进行本地预览；需要 AI 辅助时点击“智能解析”。", "idle");
     updateTotals();
     return;
   }
@@ -514,9 +900,11 @@ async function doPreview(allowAI = false, forceAI = false) {
   const isCurrentRequest = () =>
     requestId === previewRequestId && $("#raw-input").value.trim() === text;
 
-  // 命中人工确认过的完全相同原文时，直接复用已确认结构化结果，不再让模型重新猜。
+  if (allowAI) setAiStatus("正在检查输入并准备 AI 解析…", "busy");
+
+  // 命中人工确认过的完全相同原文时，直接复用结构化结果，不让模型重新猜。
   const exactCase = findExactLearningCase(text);
-  if (exactCase) {
+  if (exactCase && !forceAI && !forceChunks) {
     const result = JSON.parse(JSON.stringify(exactCase.snapshot));
     result.raw_text = text;
     result.normalized_text = exactCase.corrected_text;
@@ -532,9 +920,8 @@ async function doPreview(allowAI = false, forceAI = false) {
       saveLearningStore();
     }
     previewResult = result;
-    $("#preview-box").textContent =
-      "🧠 命中你人工确认过的学习案例（无需重新调用 AI）\n\n" +
-      (result.content || "（已确认案例没有展示文本）");
+    renderPreviewResult(result, "命中人工确认的学习案例");
+    setAiStatus("已命中已确认案例，无需重新调用 AI。添加前仍建议核对结果。", "success");
     updateTotals();
     return;
   }
@@ -548,75 +935,82 @@ async function doPreview(allowAI = false, forceAI = false) {
     const warnings = Array.isArray(localResult.warnings) ? localResult.warnings : [];
     const localEmpty = groups.length === 0;
     const severe = warnings.some(isSevereWarning);
-    const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || localEmpty || severe);
+    const needAI = allowAI && AI_AUTO_FALLBACK && (forceAI || forceChunks || localEmpty || severe);
 
     if (!needAI) {
-      $("#preview-box").textContent = localResult.content || "（无有效内容）";
+      renderPreviewResult(localResult, "本地规则解析结果");
+      setAiStatus(localEmpty || severe
+        ? "本地规则发现未识别内容；可以点击“智能解析”尝试 AI 辅助。"
+        : "本地规则预览已完成。添加前请核对所有号码与金额。", localEmpty || severe ? "idle" : "success");
       updateTotals();
       return;
     }
 
-    const similarCases = findSimilarLearningCases(text, 3);
-    $("#preview-box").textContent =
-      "🤖 本地规则无法完全确定，正在调用 Groq AI…" +
-      (similarCases.length ? "\n🧠 找到 " + similarCases.length + " 条已确认的相似案例，正在作为参考" : "");
+    const similarCases = forceChunks ? [] : findSimilarLearningCases(text, 3);
+    renderPreviewEmpty("本地规则需要进一步确认，正在调用 AI…" +
+      (similarCases.length ? " 已找到 " + similarCases.length + " 条相似学习案例。" : ""));
+    setAiStatus(forceChunks
+      ? "正在用较短提示词分段重试；较长内容可能需要等待服务额度恢复。"
+      : "正在调用 Groq AI，并保留本地解析结果…", "busy");
 
     try {
-      const aiResult = await callBetToolAI(text, similarCases);
+      const aiResult = await callBetToolAI(text, similarCases, { forceChunking: forceChunks });
       if (!isCurrentRequest()) return;
 
-      if (similarCases.length) {
+      if (similarCases.length && aiResult) {
         learningStore.metrics.retrievals += 1;
         saveLearningStore();
-        if (aiResult) aiResult.ai_learning_examples_count = similarCases.length;
+        aiResult.ai_learning_examples_count = similarCases.length;
       }
 
-      if (aiResult && aiResult.groups && aiResult.groups.length > 0) {
+      if (aiResult && Array.isArray(aiResult.groups) && aiResult.groups.length > 0) {
         previewResult = aiResult;
-        let display = "🤖 AI解析结果\n\n" + (aiResult.content || "（AI没有生成有效内容）");
-
-        if (similarCases.length) {
-          display += "\n\n🧠 参考了 " + similarCases.length + " 条已确认案例";
+        renderPreviewResult(aiResult, aiResult.ai_chunk_count
+          ? "AI 分段解析结果"
+          : (aiResult.ai_prompt_compacted ? "AI 精简提示词解析结果" : "AI 解析结果"));
+        if (aiResult.ai_chunk_count > 1) {
+          setAiStatus("长文本分段解析完成。请重点核对分段处的玩法标题、号码组与金额。", "success");
+        } else if (aiResult.ai_low_confidence || aiResult.ai_complete === false ||
+                   (Array.isArray(aiResult.warnings) && aiResult.warnings.length)) {
+          setAiStatus("AI 已返回结果，但存在需要核对的内容；请逐项确认后再添加。", "success");
+        } else {
+          setAiStatus("AI 解析完成。请核对结果后再添加到记录。", "success");
         }
-        if (aiResult.ai_low_confidence || aiResult.ai_complete === false) {
-          display += "\n\n⚠️ 结果可能不完整或存在歧义，添加前请逐项核对";
-        }
-        if (aiResult.warnings && aiResult.warnings.length) {
-          display += "\n\n⚠️ 解析提示：\n" + aiResult.warnings.join("\n");
-        }
-        if (aiResult.ai_unresolved && aiResult.ai_unresolved.length) {
-          display += "\n\n❓ 未能确定的原文：\n" + aiResult.ai_unresolved.map(x =>
-            typeof x === "string" ? x : JSON.stringify(x)
-          ).join("\n");
-        }
-        $("#preview-box").textContent = display;
       } else {
         previewResult = localResult;
-        $("#preview-box").textContent =
-          (localResult.content || "（AI也无法确定）") + "\n\n⚠️ AI未能生成可用解析，请检查原文或手动拆分";
+        renderAiFailure(new Error("AI 未能生成有效分组。请检查原文或手动拆分。"), localResult);
+        setAiStatus("AI 未返回可用分组；本地解析结果已保留。", "error");
       }
     } catch (aiError) {
       if (!isCurrentRequest()) return;
       previewResult = localResult;
-      $("#preview-box").textContent =
-        (localResult.content || "（本地解析无有效结果）") +
-        "\n\n⚠️ AI解析失败：" + aiError.message;
+      renderAiFailure(aiError, localResult);
+      setAiStatus("AI 本次未完成；输入内容和本地解析结果已保留。", "error");
     }
   } catch (error) {
     if (!isCurrentRequest()) return;
     previewResult = null;
-    $("#preview-box").textContent = "解析错误：" + error.message;
+    renderPreviewEmpty("解析引擎出现错误：" + error.message);
+    setPreviewBadge("解析失败", "danger");
+    setAiStatus("本地解析引擎出错，请刷新页面重试。", "error");
   }
 
   if (isCurrentRequest()) updateTotals();
 }
-
 function updateTotals() {
-  const p = previewResult?.total || 0;
-  const r = state.records.reduce((s, x) => s + Number(x.amount || 0), 0);
-  $("#totals").textContent = `预览金额：${fmtNum(p)}　|　记录合计：${fmtNum(r)}`;
+  const previewTotal = previewResult ? fmtNum(previewResult.total || 0) : "—";
+  const recordsTotal = state.records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const totals = $("#totals");
+  if (totals) {
+    totals.innerHTML =
+      '<span class="preview-total"><span>预览金额</span><strong>' + escapeHtml(previewTotal) + '</strong></span>' +
+      '<span><span>记录合计</span><strong>' + escapeHtml(fmtNum(recordsTotal)) + '</strong></span>';
+  }
+  const addButton = $("#btn-add");
+  if (addButton) addButton.disabled = !previewResult || !Array.isArray(previewResult.groups) || !previewResult.groups.length;
+  const copyButton = $("#btn-copy");
+  if (copyButton) copyButton.disabled = !previewResult || !(previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text);
 }
-
 async function onPaste() {
   try {
     const t = await navigator.clipboard.readText();
@@ -665,7 +1059,7 @@ async function onAdd() {
   const rec = {
     seq: state.records.length + 1,
     raw_text: previewResult.raw_text,
-    bet_content: previewResult.content,
+    bet_content: String(previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text || ""),
     amount: previewResult.total,
     created_at: ts,
     groups: previewResult.groups,
@@ -675,7 +1069,7 @@ async function onAdd() {
   };
   state.records.push(rec);
   $("#raw-input").value = "";
-  $("#preview-box").textContent = "（等待输入）";
+  renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
   previewResult = null;
   previewRequestId += 1;
   updateTotals();
@@ -684,8 +1078,11 @@ async function onAdd() {
   toast("[" + rec.user + "] 已添加 #" + rec.seq + ": " + fmtNum(rec.amount));
 }
 function onCopy() {
-  if (!previewResult?.content) { toast("没有可复制内容"); return; }
-  navigator.clipboard.writeText(previewResult.content)
+  const text = previewResult && (
+    previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text
+  );
+  if (!text) { toast("没有可复制内容"); return; }
+  navigator.clipboard.writeText(text)
     .then(() => toast("已复制"))
     .catch(() => toast("复制失败，请长按输入框手动复制"));
 }
@@ -694,8 +1091,9 @@ function onClearInput() {
   if (activeAiController) activeAiController.abort();
   previewRequestId += 1;
   $("#raw-input").value = "";
-  $("#preview-box").textContent = "（等待输入）";
+  renderPreviewEmpty("等待输入下注内容。解析完成后会在这里逐组显示结果。");
   previewResult = null;
+  setAiStatus("已清空输入框。", "idle");
   updateTotals();
 }
 async function onClearAll() {
@@ -724,26 +1122,40 @@ function renderRecords() {
   const cnt = $("#records-count");
   if (!box) return;
 
-  if (cnt) cnt.textContent = state.records.length;
+  const query = String($("#records-search")?.value || "").trim().toLowerCase();
+  const userFilter = String($("#records-user-filter")?.value || "全部");
+  const allSorted = [...state.records].sort((a, b) => b.seq - a.seq);
+  const sorted = allSorted.filter(r => {
+    if (userFilter !== "全部" && String(r.user || "") !== userFilter) return false;
+    if (!query) return true;
+    return [r.raw_text, r.bet_content, r.region, r.created_at, r.amount, r.user]
+      .some(value => String(value ?? "").toLowerCase().includes(query));
+  });
+
+  if (cnt) cnt.textContent = sorted.length === state.records.length
+    ? state.records.length + " 条" : sorted.length + " / " + state.records.length + " 条";
 
   if (!state.records.length) {
-    box.innerHTML = '<div class="empty">还没有记录</div>';
+    box.innerHTML = '<div class="empty">暂无记录 → 上方粘贴下注内容，开始你的第一笔记录</div>';
     return;
   }
-
-  const sorted = [...state.records].sort((a, b) => b.seq - a.seq);
+  if (!sorted.length) {
+    box.innerHTML = '<div class="empty">没有符合条件的记录，请修改搜索词或筛选条件。</div>';
+    return;
+  }
 
   box.innerHTML = sorted.map(r => {
     const timeShort = (r.created_at || "").slice(5, 16);
     const user = r.user || "";
-    const userTag = user ? `<span class="user" data-u="${user}">${user}</span>` : "";
-    return `<div class="rec-row">
+    const userTag = user ? `<span class="user" data-u="${escapeHtml(user)}">${escapeHtml(user)}</span>` : "";
+    const searchText = String(r.bet_content || r.raw_text || "");
+    return `<div class="rec-row" title="${escapeHtml(searchText.slice(0,240))}">
       ${userTag}
       <span class="seq">#${r.seq}</span>
-      <span class="region">${r.region || "澳门"}</span>
-      <span class="time">${timeShort}</span>
-      <span class="amount">${fmtNum(r.amount)}</span>
-      <span class="del" onclick="deleteRecord(${r.seq})">删</span>
+      <span class="region">${escapeHtml(r.region || "澳门")}</span>
+      <span class="time">${escapeHtml(timeShort)}</span>
+      <span class="amount">${escapeHtml(fmtNum(r.amount))}</span>
+      <button type="button" class="del" onclick="deleteRecord(${Number(r.seq)})" aria-label="删除第 ${Number(r.seq)} 条记录">删</button>
     </div>`;
   }).join("");
 }
@@ -773,18 +1185,26 @@ function renderSubtab(sum) {
   const box = $("#summary-content");
   const data = sum[currentSubtab] || [];
   if (!data.length) { box.innerHTML = '<div class="empty">无数据</div>'; return; }
+  const totalAmount = state.records.reduce((total, record) => total + Number(record.amount || 0), 0);
+  const groupCount = state.records.reduce((total, record) =>
+    total + (Array.isArray(record.groups) ? record.groups.length : 0), 0);
+  const stats = '<div class="summary-stats">' +
+    '<div><span>记录笔数</span><strong>' + state.records.length + '</strong></div>' +
+    '<div><span>记录总额</span><strong>' + escapeHtml(fmtNum(totalAmount)) + '</strong></div>' +
+    '<div><span>分组数量</span><strong>' + groupCount + '</strong></div>' +
+    '</div>';
   const head = {
     numbers: ["号码","生肖","波色","尾","次数","金额"],
-    zodiac:  ["生肖","对应号码","金额"],
-    plays:   ["玩法","笔/组","金额"],
+    zodiac: ["生肖","对应号码","金额"],
+    plays: ["玩法","笔/组","金额"]
   }[currentSubtab];
-  const th = head.map(h => `<th>${h}</th>`).join("");
+  const th = head.map(h => "<th>" + escapeHtml(h) + "</th>").join("");
   const tr = data.map(row => "<tr>" + row.map(v =>
-    `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`
+    "<td>" + escapeHtml(typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")) + "</td>"
   ).join("") + "</tr>").join("");
-  box.innerHTML = `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+  box.innerHTML = stats + '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+    th + '</tr></thead><tbody>' + tr + '</tbody></table></div>';
 }
-
 // ==================== 中奖页 ====================
 function onRefreshWin() { saveLocal(); refreshWin(); }
 
@@ -822,7 +1242,7 @@ async function refreshWin() {
     const title = state.winFilterUser === "全部" ? "" :
       `<div style="padding:8px;color:var(--accent);font-size:13px;font-weight:600">当前筛选：用户 ${state.winFilterUser}</div>`;
     $("#win-content").innerHTML = title +
-      `<table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+      `<div class="table-wrap"><table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
   } catch(e) {
     $("#win-content").innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
   }
@@ -854,6 +1274,8 @@ function renderRisk(rows) {
   }
 
   const head = rows[0];
+  const profitIndex = head.indexOf("预计盈亏");
+  const riskIndex = head.indexOf("风险等级");
   const summaryRow = rows.slice(1).find(r => String(r[0] || "").includes("统计"));
   const bodyRows = rows.slice(1).filter(r => !String(r[0] || "").includes("统计"));
 
@@ -862,15 +1284,15 @@ function renderRisk(rows) {
     summaryHtml = `<div class="risk-summary">
       <span class="max">📈 最大盈亏：${summaryRow[1] || "-"}</span>
       <span class="min">📉 最小盈亏：${summaryRow[2] || "-"}</span>
-      <span class="avg">📊 平均：${summaryRow[9] || "-"}</span>
+      <span class="avg">📊 平均：${summaryRow[profitIndex >= 0 ? profitIndex : 3] || "-"}</span>
     </div>`;
   }
 
   const th = head.map(h => `<th>${h}</th>`).join("");
 
   const tr = bodyRows.map(row => {
-    const profit = row[9];
-    const level = String(row[11] || "");
+    const profit = row[profitIndex >= 0 ? profitIndex : 3];
+    const level = String(row[riskIndex >= 0 ? riskIndex : row.length - 1] || "");
     let rowCls = "risk-unknown";
     if (level.includes("🔴") || level.includes("[高]")) rowCls = "risk-high";
     else if (level.includes("🟡") || level.includes("[中]")) rowCls = "risk-mid";
@@ -882,7 +1304,7 @@ function renderRisk(rows) {
       : (profitNum > 0 ? "+" : "") + fmtNum(profitNum);
 
     const tds = row.map((v, i) => {
-      if (i === 9) return `<td class="${profitCls}">${profitText}</td>`;
+      if (i === profitIndex) return `<td class="${profitCls}">${profitText}</td>`;
       return `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`;
     }).join("");
 
@@ -1038,9 +1460,60 @@ window.addEventListener("DOMContentLoaded", async () => {
   yearSel.addEventListener("change", () => {
     state.year = yearSel.value; saveLocal(); doPreview(false);
   });
-  $("header").appendChild(yearSel);
+  const headerRight = $(".header-right");
+  (headerRight || $("header")).appendChild(yearSel);
 
   $("#raw-input").addEventListener("input", schedulePreview);
+
+  const recordsSearch = $("#records-search");
+  const recordsUserFilter = $("#records-user-filter");
+  if (recordsSearch) recordsSearch.addEventListener("input", renderRecords);
+  if (recordsUserFilter) recordsUserFilter.addEventListener("change", renderRecords);
+
+  document.querySelectorAll("[data-example]").forEach(button => {
+    button.addEventListener("click", () => {
+      $("#raw-input").value = button.dataset.example || "";
+      $("#raw-input").focus();
+      doPreview(false);
+    });
+  });
+
+  const feedbackToggle = $("#toggle-learning-feedback");
+  const feedbackActions = $("#learning-feedback-actions");
+  if (feedbackToggle && feedbackActions) {
+    feedbackToggle.addEventListener("click", () => {
+      const expanded = feedbackToggle.getAttribute("aria-expanded") === "true";
+      feedbackToggle.setAttribute("aria-expanded", String(!expanded));
+      feedbackActions.hidden = expanded;
+      const icon = feedbackToggle.querySelector(".disclosure-chevron");
+      if (icon) icon.textContent = expanded ? "＋" : "−";
+    });
+  }
+
+  const learningToggle = $("#toggle-learning-details");
+  const learningPanel = $("#learning-panel");
+  if (learningToggle && learningPanel) {
+    learningToggle.addEventListener("click", () => {
+      const expanded = learningToggle.getAttribute("aria-expanded") === "true";
+      learningToggle.setAttribute("aria-expanded", String(!expanded));
+      learningPanel.hidden = expanded;
+      const icon = learningToggle.querySelector(".disclosure-chevron");
+      if (icon) icon.textContent = expanded ? "＋" : "−";
+    });
+  }
+
+  document.addEventListener("keydown", event => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+    const mod = isMac ? event.metaKey : event.ctrlKey;
+    if (!mod) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      doPreview(true, true);
+    } else if (event.key.toLowerCase() === "v" && document.activeElement !== $("#raw-input")) {
+      $("#raw-input").focus();
+      onPaste();
+    }
+  });
   $("#macau-draw").addEventListener("input", saveLocal);
   $("#hk-draw").addEventListener("input", saveLocal);
 

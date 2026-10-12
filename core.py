@@ -1388,6 +1388,35 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
 
     if pending_text():
         flush_pending_warning("末尾存在未处理内容")
+
+    # 多行二中二/三中三区块在预处理前被独立提取。将所有结果按原文位置排序，
+    # 避免该区块总是被放到普通下注前面。未知来源保持稳定顺序并排在末尾。
+    if len(parsed.groups) > 1:
+        source_search_cursor = {}
+
+        def _group_source_position(group: BetGroup, original_index: int) -> Tuple[int, int]:
+            source = str(group.source or "").strip()
+            if not source:
+                return len(normalized_full) + original_index, original_index
+            normalized_source = preprocess_text(source).strip("| \t\r\n")
+            candidates = []
+            for candidate in (normalized_source, source):
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+            for candidate in candidates:
+                cursor = source_search_cursor.get(candidate, 0)
+                position = normalized_full.find(candidate, cursor)
+                if position < 0:
+                    position = normalized_full.find(candidate)
+                if position >= 0:
+                    source_search_cursor[candidate] = position + len(candidate)
+                    return position, original_index
+            return len(normalized_full) + original_index, original_index
+
+        indexed_groups = list(enumerate(parsed.groups))
+        indexed_groups.sort(key=lambda pair: _group_source_position(pair[1], pair[0]))
+        parsed.groups = [group for _index, group in indexed_groups]
+
     if not parsed.groups:
         parsed.warnings.append("没有生成任何有效押注内容")
     return parsed
@@ -1779,8 +1808,9 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
     special_play_types = {"特码总单", "特肖", "各肖", "波色"}
     n_to_z = build_number_to_zodiac(year_animal)
 
-    header = ["地区", "假设特码", "生肖", "波色", "尾数", "统计下注额", "中奖本金",
-              "预计赔付", "回水", "预计盈亏", "命中玩法", "风险等级"]
+    # Risk dashboard puts outcome estimates before the descriptive color/tail fields.
+    header = ["地区", "假设特码", "生肖", "预计盈亏", "预计赔付", "统计下注额",
+              "中奖本金", "回水", "波色", "尾数", "命中玩法", "风险等级"]
     rows: List[List[object]] = [header]
 
     regions: List[str] = []
@@ -1789,7 +1819,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
         if region not in regions:
             regions.append(region)
     if not regions:
-        return rows + [["", "", "", "", "", 0, 0, 0, 0, 0, "暂无记录", ""]]
+        return rows + [["", "", "", "", 0, 0, 0, 0, "", "", "暂无记录", ""]]
 
     all_data: List[Tuple[float, List[object]]] = []
     for region in regions:
@@ -1838,10 +1868,10 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
             hit_text = "、".join(sorted(set(hit_plays),
                                      key=lambda x: order.index(x) if x in order else 99)) or "无"
 
-            row = [region, fmt_code(n), n_to_z.get(n, ""), NUMBER_TO_COLOR.get(n, ""),
-                   str(n % 10) + "尾", base_amount, win_stake,
+            row = [region, fmt_code(n), n_to_z.get(n, ""), final_profit,
                    "待填赔率" if unresolved else payout_total,
-                   total_rebate, final_profit, hit_text, risk_level]
+                   base_amount, win_stake, total_rebate,
+                   NUMBER_TO_COLOR.get(n, ""), str(n % 10) + "尾", hit_text, risk_level]
             all_data.append((sort_profit, row))
 
     all_data.sort(key=lambda item: -item[0])
@@ -1850,7 +1880,7 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
         max_p = max(profits); min_p = min(profits); avg_p = sum(profits) / len(profits)
         rows.append([
             "[统计]", f"最大:{fmt_num(max_p)}", f"最小:{fmt_num(min_p)}",
-            "---", "---", "", "", "", "", f"平均:{fmt_num(avg_p)}", "---", "---",
+            f"平均:{fmt_num(avg_p)}", "---", "", "", "", "---", "---", "---", "---",
         ])
 
     for _, row in all_data:
