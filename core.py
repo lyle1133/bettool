@@ -1122,9 +1122,39 @@ def _parse_general_segment(segment: str, year_animal: str) -> Tuple[List[BetGrou
     for match in matches:
         expression = segment[cursor:match.start()]
         amount = float(match.group(1))
-        new_groups, new_warnings = parse_expression(expression, amount, year_animal)
-        groups.extend(new_groups)
-        warnings.extend(new_warnings)
+
+        # “生肖 + 各号 N”表示这些生肖所对应的每个具体号码各下注 N；
+        # 它与“生肖 + 各肖 N”不同，不能按生肖玩法计成每肖一注。
+        # 例如“蛇羊狗鼠马各号30”在马年对应 21 个号码，每个 30，总额 630。
+        expression_key = re.sub(r"[\s,，、。.;；:：]+", "", expression)
+        is_zodiac_number_bet = (
+            "号" in match.group(0)
+            and bool(re.fullmatch(r"[鼠牛虎兔龙蛇马羊猴鸡狗猪]+", expression_key))
+        )
+        if is_zodiac_number_bet:
+            zodiac_map = build_zodiac_map(year_animal)
+            selected_numbers = sorted({
+                number
+                for animal in expression_key
+                for number in zodiac_map[animal]
+            })
+            if selected_numbers:
+                groups.append(BetGroup(
+                    numbers=selected_numbers,
+                    amount=amount,
+                    label="生肖对应号码",
+                    source=expression,
+                    play_type="特码总单",
+                    billing_mode="per_number",
+                    selection_text="",
+                    multiplier=1,
+                ))
+            else:
+                warnings.append(f"生肖对应号码为空，无法解析：{expression}")
+        else:
+            new_groups, new_warnings = parse_expression(expression, amount, year_animal)
+            groups.extend(new_groups)
+            warnings.extend(new_warnings)
         cursor = match.end()
     return groups, warnings, segment[cursor:]
 
