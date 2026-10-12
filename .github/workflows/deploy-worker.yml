@@ -82,7 +82,7 @@ jobs:
           {
             echo "## BetTool Cloud Sync Worker"
             echo ""
-            echo "- Worker: `bettool-private-learning-sync`"
+            echo "- Worker: bettool-private-learning-sync"
             echo "- URL: ${{ steps.deploy.outputs.deployment-url }}"
             echo "- Health check: ${{ steps.deploy.outputs.deployment-url }}/health"
             echo "- D1 migration and Worker tests ran before deployment."
