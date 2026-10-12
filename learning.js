@@ -574,12 +574,11 @@ function markCurrentCorrect() {
     toast("请先输入并解析一笔有效下注");
     return;
   }
-  const issues = [
-    ...(Array.isArray(previewResult.warnings) ? previewResult.warnings : []),
-    ...(Array.isArray(previewResult.ai_unresolved) ? previewResult.ai_unresolved : [])
-  ];
-  if ((previewResult.ai_complete === false || issues.length) &&
-      !confirm("当前结果存在解析提示。只有在你已逐项核对原文、号码、玩法、金额和组数都正确且没有遗漏时，才应保存。确定已经全部核对吗？")) {
+  const warnings = Array.isArray(previewResult.warnings) ? previewResult.warnings : [];
+  const unresolved = Array.isArray(previewResult.ai_unresolved) ? previewResult.ai_unresolved : [];
+  if (warnings.length || unresolved.length || previewResult.ai_complete === false ||
+      previewResult.ai_low_confidence === true) {
+    toast("当前结果仍有未识别或不确定内容，不能直接记为正确案例。请先点击“纠错并记住”，修正到无提示后再保存。", 4500);
     return;
   }
   const corrected = previewResult.ai_normalized_text ||
@@ -627,8 +626,11 @@ async function saveCorrectionCase() {
       toast("纠正文本未能解析，请继续修改");
       return;
     }
-    if (parsed.warnings && parsed.warnings.length &&
-        !confirm("纠正文本仍有提示：\n" + parsed.warnings.join("\n") + "\n\n确认结果没有遗漏后仍要保存吗？")) {
+    if (parsed.warnings && parsed.warnings.length) {
+      $("#learning-modal-message").textContent =
+        "纠正后的标准文本仍有未识别内容，不能保存为正确学习案例：\n" + parsed.warnings.join("\n") +
+        "\n请继续修改，直到本地校验没有提示，再保存。这样可以避免错误案例污染学习库。";
+      toast("纠正文本仍有解析提示，暂不保存。请先修正未识别内容。", 4500);
       return;
     }
     parsed.raw_text = raw;
