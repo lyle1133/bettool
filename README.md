@@ -2,7 +2,8 @@
 
 - 正式网站：https://lyle1133.github.io/bettool/
 - 私人云同步测试网站：https://bettool-private-learning-test.pages.dev/
-- 代码审查：https://github.com/lyle1133/bettool/pull/3（Draft，未合并到 main）
+- UI V2 / 私人云同步早期变更审查：https://github.com/lyle1133/bettool/pull/3（保留为历史记录）
+- 全面优化 PR：https://github.com/lyle1133/bettool/pull/4（已合并到 `feat/private-cloud-learning-sync` 测试分支；未合并到 `main`）
 
 ## 本次 UI V2 更新
 
@@ -44,7 +45,7 @@ Worker 的本地测试与部署说明见 worker/README.md。云同步密钥只�
 
 ## 数据与发布安全
 
-- 变更保留在 feat/private-cloud-learning-sync 测试分支和 Draft PR 中，尚未合并到 main。
+- 当前优化已合入 `feat/private-cloud-learning-sync` 测试分支，尚未合并到生产 `main`。Worker 的允许来源配置已更新到仓库；要让正在运行的 Worker 生效，仍需从 `worker/` 目录重新部署。
 - 首次同步或进行大规模导入前，请导出学习库 JSON 备份。
 - 云同步范围为学习案例、待处理样本、删除标记和学习计数；不包括下注记录、赔率、开奖号码或 Groq API Key。
 - 修改过的解析和 AI 恢复逻辑应在测试网站进行实测；新增测试通过并不等于覆盖了所有下注格式。
