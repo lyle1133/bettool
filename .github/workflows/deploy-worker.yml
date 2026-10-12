@@ -1,0 +1,89 @@
+name: Deploy BetTool Cloud Sync Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deployment:
+        description: "Type DEPLOY to apply the D1 migration and deploy the Worker"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bettool-cloud-sync-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test and deploy Worker
+    if: ${{ github.event.inputs.confirm_deployment == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Check required secrets without printing them
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BETTOOL_SYNC_TOKEN: ${{ secrets.BETTOOL_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]] || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          [[ -n "$CLOUDFLARE_API_TOKEN" ]] || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          [[ -n "$BETTOOL_SYNC_TOKEN" ]] || { echo "::error::Missing GitHub Actions secret BETTOOL_SYNC_TOKEN"; exit 1; }
+          [[ ${#BETTOOL_SYNC_TOKEN} -ge 32 ]] || { echo "::error::BETTOOL_SYNC_TOKEN must be at least 32 characters"; exit 1; }
+          echo "Required secrets are present."
+
+      - name: Install Worker dependencies
+        working-directory: worker
+        run: npm install --no-audit --no-fund
+
+      - name: Run Worker tests
+        working-directory: worker
+        run: npm test
+
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          wranglerVersion: "4.135.0"
+          command: d1 migrations apply bettool-learning-sync --remote
+
+      - name: Deploy Worker and set sync token
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          wranglerVersion: "4.135.0"
+          command: deploy
+          secrets: |
+            BETTOOL_SYNC_TOKEN
+        env:
+          BETTOOL_SYNC_TOKEN: ${{ secrets.BETTOOL_SYNC_TOKEN }}
+
+      - name: Record deployment details
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          {
+            echo "## BetTool Cloud Sync Worker"
+            echo ""
+            echo "- Worker: `bettool-private-learning-sync`"
+            echo "- URL: ${{ steps.deploy.outputs.deployment-url }}"
+            echo "- Health check: ${{ steps.deploy.outputs.deployment-url }}/health"
+            echo "- D1 migration and Worker tests ran before deployment."
+          } >> "$GITHUB_STEP_SUMMARY"
