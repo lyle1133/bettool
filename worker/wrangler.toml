@@ -9,4 +9,4 @@ database_id = "51af16b2-0f11-4afc-9549-4d952f0df5ad"
 migrations_dir = "migrations"
 
 [vars]
-ALLOWED_ORIGIN = "https://lyle1133.github.io"
+ALLOWED_ORIGIN = "https://lyle1133.github.io,https://bettool-private-learning-test.pages.dev"

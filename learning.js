@@ -192,6 +192,26 @@ function setLearningSyncStatus(message, isError) {
   node.style.color = isError ? "var(--danger, #ff7777)" : "var(--muted)";
 }
 
+function enhanceLearningSyncControls() {
+  const tokenInput = $("#learning-sync-token");
+  if (!tokenInput || tokenInput.dataset.controlsReady === "1") return;
+  tokenInput.dataset.controlsReady = "1";
+  const row = document.createElement("div");
+  row.className = "sync-token-actions";
+  row.innerHTML = '<button type="button" class="secondary" id="toggle-sync-token">显示密钥</button><button type="button" class="secondary" id="copy-sync-token">复制密钥</button>';
+  tokenInput.insertAdjacentElement("afterend", row);
+  $("#toggle-sync-token")?.addEventListener("click", () => {
+    const visible = tokenInput.type === "text";
+    tokenInput.type = visible ? "password" : "text";
+    $("#toggle-sync-token").textContent = visible ? "显示密钥" : "隐藏密钥";
+  });
+  $("#copy-sync-token")?.addEventListener("click", async () => {
+    if (!tokenInput.value) { toast("请先填写同步密钥"); return; }
+    try { await navigator.clipboard.writeText(tokenInput.value); toast("同步密钥已复制"); }
+    catch (_) { tokenInput.focus(); tokenInput.select(); toast("无法自动复制，请手动复制"); }
+  });
+}
+
 function saveLearningSyncConfig() {
   const urlInput = $("#learning-sync-url");
   const tokenInput = $("#learning-sync-token");
@@ -388,7 +408,11 @@ async function syncLearningNow(silent) {
     throw new Error("多设备数据持续冲突。请稍后再次点击“立即同步”。");
   } catch (e) {
     console.warn("云端学习库同步失败：", e);
-    finalStatusMessage = "同步失败：" + e.message + "；本地数据未清除。";
+    const rawMessage = String(e && e.message || e || "未知错误");
+    const networkHint = /Failed to fetch|Load failed|NetworkError|fetch/i.test(rawMessage)
+      ? "浏览器无法读取云端响应，常见原因是 Worker 的 CORS 白名单未包含当前 Pages 预览域名，或 Worker 暂时不可用。请检查 Worker 的 OPTIONS 预检与 Access-Control-Allow-Origin。"
+      : "";
+    finalStatusMessage = "同步失败：" + rawMessage + (networkHint ? "。排查建议：" + networkHint : "") + "；本地数据未清除。";
     finalStatusIsError = true;
     setLearningSyncStatus(finalStatusMessage, true);
     if (!silent) toast("同步失败：" + e.message, 4500);
@@ -650,9 +674,11 @@ function updateLearningUI() {
   const syncConfig = getLearningSyncConfig();
   const urlInput = $("#learning-sync-url");
   const tokenInput = $("#learning-sync-token");
+  enhanceLearningSyncControls();
   if (urlInput && (!document.activeElement || document.activeElement !== urlInput)) urlInput.value = syncConfig.url;
   if (tokenInput && (!document.activeElement || document.activeElement !== tokenInput)) tokenInput.value = syncConfig.token;
   const syncStatus = $("#learning-sync-status");
+  enhanceLearningSyncControls();
   if (syncStatus && !learningSyncBusy) {
     if (learningSyncReady) syncStatus.textContent = "云端同步已连接 · 版本 " + (learningSyncRevision === null ? "已验证" : learningSyncRevision);
     else if (syncConfig.url && syncConfig.token) syncStatus.textContent = "云端配置已保存；等待同步验证。";

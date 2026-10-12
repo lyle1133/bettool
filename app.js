@@ -89,6 +89,10 @@ const SYSTEM_PROMPT = `
 5. 只有原文明确支持的玩法才能使用。词义不清、金额不清、玩法不清时，必须标为 unresolved。
 6. normalized_text 必须与 items[].normalized 的内容和顺序一致；若某一笔无法可靠标准化，不要从 normalized_text 中悄悄删去，而应在 unresolved 解释。
 7. 置信度不是事实。存在歧义时，即使生成了候选格式，confidence 也应低于 0.75 并写出 warning。
+8. 输出前必须做“原文覆盖检查”：逐行、逐笔将原文对应到 items 或 unresolved；每一笔都必须有归属。无法确认的片段必须放入 unresolved，不可因为格式杂乱、重复或太长而省略。
+9. 不要去重原文中的重复下注；相同号码、金额或相同文本若出现多次，除非用户明确要求合并，否则必须按出现次数保留。
+10. 对二中二/三中三的多行内容，逐个核对每一组号码；只有在标题、金额继承关系明确时才可从上下文继承玩法或金额。若无法确认某行属于哪种玩法或金额，保留该行并放入 unresolved。
+11. 生成后检查 items 的数量与原文中的独立下注笔数是否一致；若不一致，必须说明缺失/歧义部分，不得声称完整成功。
 
 支持玩法和标准格式：
 A. 普通号码单注：不要添加“特码总单”前缀。
@@ -1118,26 +1122,40 @@ function renderRecords() {
   const cnt = $("#records-count");
   if (!box) return;
 
-  if (cnt) cnt.textContent = state.records.length + " 条";
+  const query = String($("#records-search")?.value || "").trim().toLowerCase();
+  const userFilter = String($("#records-user-filter")?.value || "全部");
+  const allSorted = [...state.records].sort((a, b) => b.seq - a.seq);
+  const sorted = allSorted.filter(r => {
+    if (userFilter !== "全部" && String(r.user || "") !== userFilter) return false;
+    if (!query) return true;
+    return [r.raw_text, r.bet_content, r.region, r.created_at, r.amount, r.user]
+      .some(value => String(value ?? "").toLowerCase().includes(query));
+  });
+
+  if (cnt) cnt.textContent = sorted.length === state.records.length
+    ? state.records.length + " 条" : sorted.length + " / " + state.records.length + " 条";
 
   if (!state.records.length) {
-    box.innerHTML = '<div class="empty">还没有记录</div>';
+    box.innerHTML = '<div class="empty">暂无记录 → 上方粘贴下注内容，开始你的第一笔记录</div>';
     return;
   }
-
-  const sorted = [...state.records].sort((a, b) => b.seq - a.seq);
+  if (!sorted.length) {
+    box.innerHTML = '<div class="empty">没有符合条件的记录，请修改搜索词或筛选条件。</div>';
+    return;
+  }
 
   box.innerHTML = sorted.map(r => {
     const timeShort = (r.created_at || "").slice(5, 16);
     const user = r.user || "";
-    const userTag = user ? `<span class="user" data-u="${user}">${user}</span>` : "";
-    return `<div class="rec-row">
+    const userTag = user ? `<span class="user" data-u="${escapeHtml(user)}">${escapeHtml(user)}</span>` : "";
+    const searchText = String(r.bet_content || r.raw_text || "");
+    return `<div class="rec-row" title="${escapeHtml(searchText.slice(0,240))}">
       ${userTag}
       <span class="seq">#${r.seq}</span>
-      <span class="region">${r.region || "澳门"}</span>
-      <span class="time">${timeShort}</span>
-      <span class="amount">${fmtNum(r.amount)}</span>
-      <span class="del" onclick="deleteRecord(${r.seq})">删</span>
+      <span class="region">${escapeHtml(r.region || "澳门")}</span>
+      <span class="time">${escapeHtml(timeShort)}</span>
+      <span class="amount">${escapeHtml(fmtNum(r.amount))}</span>
+      <button type="button" class="del" onclick="deleteRecord(${Number(r.seq)})" aria-label="删除第 ${Number(r.seq)} 条记录">删</button>
     </div>`;
   }).join("");
 }
@@ -1446,6 +1464,56 @@ window.addEventListener("DOMContentLoaded", async () => {
   (headerRight || $("header")).appendChild(yearSel);
 
   $("#raw-input").addEventListener("input", schedulePreview);
+
+  const recordsSearch = $("#records-search");
+  const recordsUserFilter = $("#records-user-filter");
+  if (recordsSearch) recordsSearch.addEventListener("input", renderRecords);
+  if (recordsUserFilter) recordsUserFilter.addEventListener("change", renderRecords);
+
+  document.querySelectorAll("[data-example]").forEach(button => {
+    button.addEventListener("click", () => {
+      $("#raw-input").value = button.dataset.example || "";
+      $("#raw-input").focus();
+      doPreview(false);
+    });
+  });
+
+  const feedbackToggle = $("#toggle-learning-feedback");
+  const feedbackActions = $("#learning-feedback-actions");
+  if (feedbackToggle && feedbackActions) {
+    feedbackToggle.addEventListener("click", () => {
+      const expanded = feedbackToggle.getAttribute("aria-expanded") === "true";
+      feedbackToggle.setAttribute("aria-expanded", String(!expanded));
+      feedbackActions.hidden = expanded;
+      const icon = feedbackToggle.querySelector(".disclosure-chevron");
+      if (icon) icon.textContent = expanded ? "＋" : "−";
+    });
+  }
+
+  const learningToggle = $("#toggle-learning-details");
+  const learningPanel = $("#learning-panel");
+  if (learningToggle && learningPanel) {
+    learningToggle.addEventListener("click", () => {
+      const expanded = learningToggle.getAttribute("aria-expanded") === "true";
+      learningToggle.setAttribute("aria-expanded", String(!expanded));
+      learningPanel.hidden = expanded;
+      const icon = learningToggle.querySelector(".disclosure-chevron");
+      if (icon) icon.textContent = expanded ? "＋" : "−";
+    });
+  }
+
+  document.addEventListener("keydown", event => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+    const mod = isMac ? event.metaKey : event.ctrlKey;
+    if (!mod) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      doPreview(true, true);
+    } else if (event.key.toLowerCase() === "v" && document.activeElement !== $("#raw-input")) {
+      $("#raw-input").focus();
+      onPaste();
+    }
+  });
   $("#macau-draw").addEventListener("input", saveLocal);
   $("#hk-draw").addEventListener("input", saveLocal);
 

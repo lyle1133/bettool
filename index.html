@@ -6,20 +6,20 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BetTool">
-<meta name="theme-color" content="#0e1014">
+<meta name="theme-color" content="#F9FAFB">
 <title>BetTool · 押注解析与统计</title>
 <style>
 :root{
-  color-scheme:dark;
-  --bg:#0b0d12;--panel:#141821;--panel-raised:#1a202b;--panel-soft:#202735;
-  --accent:#4285f4;--accent-hover:#5895fb;--text:#f2f4f8;--muted:#a2aabb;
-  --subtle:#717c90;--border:#2a3241;--success:#55d99b;--warning:#ffd166;--danger:#ff7777;
-  --radius:16px;--radius-sm:11px;--shadow:0 14px 38px rgba(0,0,0,.16);
+  color-scheme:light;
+  --bg:#F9FAFB;--panel:#FFFFFF;--panel-raised:#FFFFFF;--panel-soft:#F3F4F6;
+  --accent:#2563EB;--accent-hover:#1D4ED8;--text:#1F2937;--muted:#6B7280;
+  --subtle:#6B7280;--border:#E5E7EB;--success:#10B981;--warning:#F59E0B;--danger:#EF4444;
+  --radius:12px;--radius-sm:6px;--shadow:0 8px 24px rgba(31,41,55,.06);
   --safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:16px;-webkit-text-size-adjust:100%;overflow:hidden}
-body{display:flex;flex-direction:column;height:100dvh;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);background:radial-gradient(ellipse at 50% -20%,rgba(66,133,244,.10),transparent 48%),var(--bg)}
+body{display:flex;flex-direction:column;height:100dvh;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);background:var(--bg)}
 button,input,textarea,select{font:inherit}
 button{border:1px solid transparent;cursor:pointer;min-height:44px;padding:11px 14px;border-radius:var(--radius-sm);font-size:14px;font-weight:650;color:var(--text);background:var(--panel-soft);transition:background .15s,border-color .15s,transform .15s}
 button:hover{border-color:#3c465a}
@@ -228,6 +228,47 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
   .group-meta strong{font-size:12px}
   .risk-summary{grid-template-columns:1fr}
 }
+
+.sync-token-actions{display:flex;gap:8px;margin-top:6px}.sync-token-actions button{flex:1;min-height:40px;font-size:13px;padding:8px}
+/* BetTool accessibility and responsive refinements */
+:root { color-scheme: light; }
+body, html { background:var(--bg); color:var(--text); }
+.app-header, nav.tabbar { background:#fff; }
+.card, .subtab-content, #records-list, .sync-config { background:#fff; border-color:var(--border); }
+button { border-radius:6px; transition:background-color .15s ease,border-color .15s ease,box-shadow .15s ease; }
+button.primary { background:#2563EB; color:#fff; }
+button.secondary { background:#F3F4F6; color:#1F2937; border:1px solid #E5E7EB; }
+button:hover { filter:brightness(.97); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline:3px solid rgba(37,99,235,.28); outline-offset:2px; }
+input,textarea,select { background:#fff; color:#1F2937; border-color:#E5E7EB; }
+#raw-input { min-height:150px; }
+.example-prompts { display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#6B7280; }
+.example-prompts button { flex:0 1 auto;min-height:34px;padding:6px 10px;font-size:12px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE; }
+.records-filters { display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:8px;margin:10px 0; }
+.records-filters input,.records-filters select { min-height:44px;font-size:14px; }
+.disclosure-toggle { width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;background:transparent;color:inherit;border:0;padding:12px 0;min-height:56px; }
+.disclosure-toggle .disclosure-title { display:flex;align-items:center;gap:10px; }
+.disclosure-toggle p { font-size:12px;color:#6B7280;margin-top:3px; }
+.disclosure-chevron { font-size:22px;color:#6B7280; }
+#learning-panel[hidden], #learning-feedback-actions[hidden] { display:none!important; }
+.learning-feedback .section-title { width:100%;color:inherit; }
+.learning-feedback .section-title h3 { margin:0; }
+.learning-feedback .section-title p { font-size:12px;color:#6B7280;margin-top:3px; }
+#learning-panel .sync-help { color:#6B7280; }
+#learning-sync-status { overflow-wrap:anywhere; }
+@media (min-width:1024px) {
+  #tab-input { display:none; }
+  #tab-input.active { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;gap:16px; }
+  #tab-input > .tab-heading, #tab-input > .user-bar, #tab-input > .records-panel, #tab-input > #learning-details { grid-column:1 / -1; }
+  #tab-input > .input-card { grid-column:1; }
+  #tab-input > .result-card { grid-column:2;grid-row:3 / span 2; }
+  #tab-input > .records-panel { grid-row:auto; }
+}
+@media (max-width:600px) {
+  .records-filters { grid-template-columns:1fr; }
+  .input-actions button,.preview-actions button { min-height:44px; }
+  .example-prompts button { min-height:40px; }
+}
 </style>
 </head>
 <body>
@@ -238,7 +279,7 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
 <header class="app-header">
   <div class="brand">
     <div class="brand-mark">BT</div>
-    <div class="brand-copy"><h1>BetTool</h1><p>押注解析与统计</p></div>
+    <div class="brand-copy"><h1>BetTool · 押注解析与统计</h1><p>粘贴 → 解析 → 核对 → 保存</p></div>
   </div>
   <div class="header-right"><span id="status">正在初始化…</span></div>
 </header>
@@ -256,7 +297,8 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
     </div>
     <section class="card input-card">
       <label class="field-label" for="raw-input">下注内容</label>
-      <textarea id="raw-input" rows="5" spellcheck="false" placeholder="在这里粘贴下注内容…&#10;例如：龙鸡二连肖200&#10;猴30米&#10;鸡狗鼠各肖10"></textarea>
+      <textarea id="raw-input" rows="5" spellcheck="false" placeholder="粘贴下注内容到这里，支持多行与多种玩法格式"></textarea>
+      <div class="example-prompts" aria-label="点击填入示例"><span>试试：</span><button type="button" data-example="龙鸡二连肖200">龙鸡二连肖200</button><button type="button" data-example="猴30米">猴30米</button><button type="button" data-example="三中三\n45-05-22\n23-26-17各组10">三中三多行示例</button></div>
       <div class="input-meta"><span>支持多行内容与多种玩法</span><span>先解析，再核对</span></div>
       <div class="btn-row input-actions">
         <button class="secondary" id="btn-paste" onclick="onPaste()">粘贴</button>
@@ -280,10 +322,10 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
         <button class="secondary" id="btn-copy" onclick="onCopy()">复制解析</button>
       </div>
       <div class="learning-feedback" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-        <div class="section-title">
-          <div><h3>AI 学习反馈</h3><p>识别有误时纠正并记住；完全正确时确认案例。</p></div>
-        </div>
-        <div class="learning-btn-row">
+        <button type="button" class="section-title disclosure-toggle" id="toggle-learning-feedback" aria-expanded="false" aria-controls="learning-feedback-actions">
+          <span><h3>AI 学习反馈</h3><p>识别有误时纠正并记住；完全正确时确认案例。</p></span><span class="disclosure-chevron" aria-hidden="true">＋</span>
+        </button>
+        <div id="learning-feedback-actions" class="learning-btn-row" hidden>
           <button class="learn-good" onclick="markCurrentCorrect()">✅ 识别正确</button>
           <button class="learn-correct" onclick="openCorrectionEditor()">✏️ 纠错并记住</button>
           <button class="learn-unknown" onclick="markCurrentUnresolved()">❓ 无法识别</button>
@@ -292,10 +334,10 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
     </section>
 
     <section id="learning-details" class="card">
-      <div class="panel-heading">
-        <div class="disclosure-title"><div class="icon-badge">🧠</div><div><h3>AI 学习与云端同步</h3><p>纠错案例、备份与多设备同步</p></div></div>
-      </div>
-      <div id="learning-panel" class="learning-panel" style="padding:12px 0 0">
+      <button type="button" class="panel-heading disclosure-toggle" id="toggle-learning-details" aria-expanded="false" aria-controls="learning-panel">
+        <span class="disclosure-title"><span class="icon-badge">🧠</span><span><h3>AI 学习与云端同步</h3><p>纠错案例、备份与多设备同步</p></span></span><span class="disclosure-chevron" aria-hidden="true">＋</span>
+      </button>
+      <div id="learning-panel" class="learning-panel" style="padding:12px 0 0" hidden>
         <div class="learning-title">AI 自我迭代 · 学习库</div>
         <div class="learning-help">先核对解析结果，再点击“识别正确”或“纠错并记住”。只有人工确认的案例才会用于后续参考；无法识别的内容单独记录为待处理样本。</div>
         <div id="learning-stats">正在加载学习库…</div>
@@ -327,7 +369,11 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
 
     <section class="card records-panel">
       <div class="records-header"><h3>已添加记录</h3><span class="count" id="records-count">0 条</span></div>
-      <div id="records-list"><div class="empty">还没有记录</div></div>
+      <div class="records-filters">
+        <input id="records-search" type="search" placeholder="搜索原文、玩法或金额…" aria-label="搜索历史记录">
+        <select id="records-user-filter" aria-label="按用户筛选记录"><option value="全部">全部用户</option><option value="A">用户 A</option><option value="B">用户 B</option><option value="C">用户 C</option><option value="D">用户 D</option></select>
+      </div>
+      <div id="records-list"><div class="empty">暂无记录 → 上方粘贴下注内容，开始你的第一笔记录</div></div>
     </section>
   </section>
 
@@ -407,7 +453,7 @@ nav.tabbar button.active{color:#a7c8ff;background:rgba(66,133,244,.11)}
   <button data-tab="settings" onclick="switchTab('settings')">设置</button>
 </nav>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=14"></script>
-<script src="learning.js?v=3"></script>
+<script src="app.js?v=16"></script>
+<script src="learning.js?v=4"></script>
 </body>
 </html>
