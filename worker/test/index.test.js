@@ -5,7 +5,7 @@ import worker from "../src/index.js";
 const token = "a".repeat(64);
 const env = {
   BETTOOL_SYNC_TOKEN: token,
-  ALLOWED_ORIGIN: "https://lyle1133.github.io",
+  ALLOWED_ORIGIN: "https://lyle1133.github.io,https://bettool-private-learning-test.pages.dev",
   DB: null
 };
 
@@ -130,4 +130,52 @@ test("invalid JSON and excessive case count are rejected", async () => {
     }})
   }), { ...env, DB: db });
   assert.equal(tooMany.status, 400);
+});
+
+
+test("test Pages origin is allowed and preflight includes CORS headers", async () => {
+  const origin = "https://bettool-private-learning-test.pages.dev";
+  const response = await worker.fetch(request("/api/v1/learning", {
+    method: "OPTIONS",
+    headers: {
+      Origin: origin,
+      "Access-Control-Request-Method": "PUT",
+      "Access-Control-Request-Headers": "authorization,content-type"
+    }
+  }), env);
+
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(response.headers.get("Access-Control-Allow-Methods") || "", /GET/);
+  assert.match(response.headers.get("Access-Control-Allow-Methods") || "", /PUT/);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") || "", /Authorization/i);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") || "", /Content-Type/i);
+  assert.equal(response.headers.get("Vary"), "Origin");
+});
+
+test("production Pages origin is allowed by preflight", async () => {
+  const origin = "https://lyle1133.github.io";
+  const response = await worker.fetch(request("/api/v1/learning", {
+    method: "OPTIONS",
+    headers: {
+      Origin: origin,
+      "Access-Control-Request-Method": "PUT",
+      "Access-Control-Request-Headers": "authorization,content-type"
+    }
+  }), env);
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+});
+
+test("unapproved Pages preview origin is blocked", async () => {
+  const response = await worker.fetch(request("/api/v1/learning", {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://random-preview.pages.dev",
+      "Access-Control-Request-Method": "PUT",
+      "Access-Control-Request-Headers": "authorization,content-type"
+    }
+  }), env);
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
 });
