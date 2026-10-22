@@ -1515,7 +1515,7 @@ def parse_draw_result(raw_text: str, year_animal: str) -> DrawResult:
         result.warnings.append("没有识别到 01–49 的开奖号码")
         return result
     nums = list(found)
-    if len(nums) < len(set(nums)):
+    if len(nums) > len(set(nums)):
         result.warnings.append("开奖号码中存在重复号码；已保留原始顺序以免错位识别平码和特码")
     if len(nums) > 7:
         result.warnings.append("超过 7 个开奖号码：按前 6 个为平码、第 7 个为特码，忽略其余号码")
