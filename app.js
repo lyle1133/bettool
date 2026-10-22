@@ -12,7 +12,7 @@ const YEAR_MAP = {
 const DEFAULT_ODDS = {
   tema:47, texiao:11, texiao_ma:10,
   pingte_xiao:2, pingte_xiao_ma:1.75,
-  pingte_tail:null, color:null,
+  pingte_tail_0:2.1, pingte_tail:1.85, color:null,
   lianxiao_2:4, lianxiao_2_ma:3.5,
   lianxiao_3:10, lianxiao_3_ma:8.5,
   lianxiao_4:30, lianxiao_4_ma:25,
@@ -24,12 +24,13 @@ const DEFAULT_ODDS = {
 const ODDS_ITEMS = [
   ["tema","特码"],["texiao","特肖（非马）"],["texiao_ma","特肖马"],
   ["pingte_xiao","平特一肖（不带马）"],["pingte_xiao_ma","平特一肖（带马/马）"],
-  ["pingte_tail","平特尾"],["color","波色/色单双"],
+  ["pingte_tail_0","平特0尾（仅前六个平码，1赔2.1带本）"],
+  ["pingte_tail","平特尾（1–9尾，1赔1.85带本）"],["color","波色/色单双"],
   ["lianxiao_2","二连肖（不带马）"],["lianxiao_2_ma","二连肖（带马）"],
   ["lianxiao_3","三连肖（不带马）"],["lianxiao_3_ma","三连肖（带马）"],
   ["lianxiao_4","四连肖（不带马）"],["lianxiao_4_ma","四连肖（带马）"],
   ["lianxiao_5","五连肖（不带马）"],["lianxiao_5_ma","五连肖（带马）"],
-  ["pingma_2","二中二"],["pingma_3","三中三"],["wubuzhong","五不中"],
+  ["pingma_2","二中二"],["pingma_3","三中三"],["wubuzhong","五/六/七不中（共用赔率）"],
 ];
 
 const DEFAULT_REBATE = {
@@ -212,7 +213,14 @@ function loadLocal() {
     const data = JSON.parse(raw);
     if (data.year) state.year = data.year;
     if (Array.isArray(data.records)) state.records = data.records;
-    if (data.odds) state.odds = { ...DEFAULT_ODDS, ...data.odds };
+    if (data.odds) {
+      state.odds = { ...DEFAULT_ODDS, ...data.odds };
+      // Migrate only legacy blank general-tail odds to the published 1.85 rule.
+      // Any explicitly configured non-null custom value is preserved.
+      if (data.odds.pingte_tail === null || data.odds.pingte_tail === undefined) {
+        state.odds.pingte_tail = 1.85;
+      }
+    }
     if (data.rebate) state.rebate = { ...DEFAULT_REBATE, ...data.rebate };
     if (data.currentUser) state.currentUser = data.currentUser;
     if (data.winFilterUser) state.winFilterUser = data.winFilterUser;
@@ -328,7 +336,7 @@ async function initPyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
   });
   lm.textContent = "正在加载解析内核…";
-  const coreSrc = await fetch("core.py?v=8", { cache: "no-store" }).then(r => r.text());
+  const coreSrc = await fetch("core.py?v=9", { cache: "no-store" }).then(r => r.text());
 
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`
