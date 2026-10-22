@@ -89,7 +89,8 @@ YEAR_OPTIONS = {
 DEFAULT_ODDS: Dict[str, Optional[float]] = {
     "tema": 47.0, "texiao": 11.0, "texiao_ma": 10.0,
     "pingte_xiao": 2.0, "pingte_xiao_ma": 1.75,
-    "pingte_tail": None, "color": None,
+    "pingte_tail_0": 2.1, "pingte_tail": 1.85, "color": None,
+    "wubuzhong": None,
     "lianxiao_2": 4.0, "lianxiao_2_ma": 3.5,
     "lianxiao_3": 10.0, "lianxiao_3_ma": 8.5,
     "lianxiao_4": 30.0, "lianxiao_4_ma": 25.0,
@@ -99,7 +100,9 @@ DEFAULT_ODDS: Dict[str, Optional[float]] = {
 ODDS_ITEMS: List[Tuple[str, str]] = [
     ("tema", "特码"), ("texiao", "特肖（非马）"), ("texiao_ma", "特肖马"),
     ("pingte_xiao", "平特一肖（不带马）"), ("pingte_xiao_ma", "平特一肖（带马/马）"),
-    ("pingte_tail", "平特尾"), ("color", "波色/色单双"),
+    ("pingte_tail_0", "平特0尾（仅前六个平码，1赔2.1带本）"),
+    ("pingte_tail", "平特尾（1–9尾，1赔1.85带本）"),
+    ("color", "波色/色单双"),
     ("lianxiao_2", "二连肖（不带马）"), ("lianxiao_2_ma", "二连肖（带马）"),
     ("lianxiao_3", "三连肖（不带马）"), ("lianxiao_3_ma", "三连肖（带马）"),
     ("lianxiao_4", "四连肖（不带马）"), ("lianxiao_4_ma", "四连肖（带马）"),
@@ -1561,8 +1564,10 @@ def _pingte_zodiac_odds(animal: str, odds_config=None) -> Optional[float]:
     return odds.get("pingte_xiao_ma") if animal == "马" else odds.get("pingte_xiao")
 
 
-def _pingte_tail_odds(odds_config=None) -> Optional[float]:
-    return normalize_odds_config(odds_config).get("pingte_tail")
+def _pingte_tail_odds(odds_config=None, tail: Optional[int] = None) -> Optional[float]:
+    odds = normalize_odds_config(odds_config)
+    # 0 尾按通知单独结算；其他尾数使用通用平特尾赔率。
+    return odds.get("pingte_tail_0") if tail == 0 else odds.get("pingte_tail")
 
 
 def _color_odds(odds_config=None) -> Optional[float]:
@@ -1664,28 +1669,40 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
         hit = [t for t in tails if t in draw.tail_set]
         if hit:
             win_stake = group.amount * len(hit)
-            odds = _pingte_tail_odds(odds_config)
-            if odds is None:
-                return True, "平特尾命中：" + ",".join(str(t)+"尾" for t in hit) + "；未设置赔率", win_stake, "待填赔率", None, None
-            payout = win_stake * odds
-            return True, "平特尾命中：" + ",".join(str(t)+"尾" for t in hit), win_stake, _odds_label(odds), payout, payout - group.total
-        return False, "未中平特尾", 0.0, "", 0.0, -group.total
+            payout = 0.0
+            odds_labels = []
+            missing_odds = []
+            for tail in hit:
+                odds = _pingte_tail_odds(odds_config, tail=tail)
+                odds_labels.append(f"{tail}尾{_odds_label(odds)}")
+                if odds is None:
+                    missing_odds.append(tail)
+                else:
+                    payout += group.amount * odds
+            hit_text = ",".join(str(t) + "尾" for t in hit)
+            if missing_odds:
+                missing_text = ",".join(str(t) + "尾" for t in missing_odds)
+                return True, f"平特尾命中：{hit_text}；{missing_text}赔率未设置", win_stake, ",".join(odds_labels), None, None
+            payout_note = "带本；赔付=各命中尾数下注额×对应赔率"
+            return True, f"平特尾命中：{hit_text}；{payout_note}", win_stake, ",".join(odds_labels), payout, payout - group.total
+        return False, "未中平特尾（只按前六个平码尾数结算）", 0.0, "", 0.0, -group.total
     if play in {"五不中", "六不中", "七不中"}:
         nums = _split_selection_numbers(group.selection_text)
         if not nums:
             return False, f"{play}未识别到号码", 0.0, "", 0.0, -group.total
-        
-        # 判断平码中是否出现了这些号码（特码不算）
-        hit_in_pingma = any(n in draw.pingma_set for n in nums)
-        
-        if not hit_in_pingma:
+
+        # “不中”按全部七个开奖号码判断：前六个平码 + 第七个特码。
+        # 任一所选号码出现在七个开奖号码中即不中；特码不参与平特尾/平特肖结算的规则不套用到数字不中玩法。
+        hit_numbers = [n for n in nums if n in set(draw.numbers)]
+        if not hit_numbers:
             odds = odds_config.get("wubuzhong")
             if odds is None:
-                return True, f"{play}命中（平码未包含所选号码）；未设置赔率", group.amount, "待填赔率", None, None
+                return True, f"{play}命中（全部七个开奖号码均未包含所选号码）；未设置赔率", group.amount, "待填赔率", None, None
             payout = group.amount * odds
-            return True, f"{play}命中", group.amount, _odds_label(odds), payout, payout - group.total
-        
-        return False, f"未中{play}", 0.0, "", 0.0, -group.total
+            return True, f"{play}命中（所选号码均未出现在七个开奖号码中）", group.amount, _odds_label(odds), payout, payout - group.total
+
+        hit_text = "、".join(fmt_code(n) for n in hit_numbers)
+        return False, f"未中{play}：所选号码 {hit_text} 出现在开奖号码中", 0.0, "", 0.0, -group.total
     if play in {"二中二", "三中三"}:
         choose = 2 if play == "二中二" else 3
         from itertools import combinations
