@@ -108,6 +108,7 @@ ODDS_ITEMS: List[Tuple[str, str]] = [
     ("lianxiao_4", "四连肖（不带马）"), ("lianxiao_4_ma", "四连肖（带马）"),
     ("lianxiao_5", "五连肖（不带马）"), ("lianxiao_5_ma", "五连肖（带马）"),
     ("pingma_2", "二中二"), ("pingma_3", "三中三"),
+    ("wubuzhong", "五/六/七不中（共用赔率）"),
 ]
 
 
@@ -170,14 +171,14 @@ DEFAULT_REBATE: Dict[str, Optional[float]] = {
     "global": 0.0, "tema": None, "texiao": None,
     "pingte_xiao": None, "pingte_tail": None, "color": None,
     "lianxiao_2": None, "lianxiao_3": None, "lianxiao_4": None, "lianxiao_5": None,
-    "pingma_2": None, "pingma_3": None,
+    "pingma_2": None, "pingma_3": None, "wubuzhong": None,
 }
 REBATE_ITEMS: List[Tuple[str, str]] = [
     ("global", "统一回水率"), ("tema", "特码总单"), ("texiao", "特肖/各肖"),
     ("pingte_xiao", "平特一肖"), ("pingte_tail", "尾数平特"), ("color", "波色/色单双"),
     ("lianxiao_2", "二连肖"), ("lianxiao_3", "三连肖"),
     ("lianxiao_4", "四连肖"), ("lianxiao_5", "五连肖"),
-    ("pingma_2", "二中二"), ("pingma_3", "三中三"),
+    ("pingma_2", "二中二"), ("pingma_3", "三中三"), ("wubuzhong", "五/六/七不中"),
 ]
 
 ODDS_CONFIG_PATH = get_app_dir() / "赔率设置.json"
