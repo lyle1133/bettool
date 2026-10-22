@@ -226,7 +226,7 @@ const PY_WRAPPER = `
 import json
 from core import (
     parse_bet, parse_draw_result, settle_orders,
-    summarize_orders, export_xlsx, build_risk_rows,
+    summarize_orders, export_xlsx, build_risk_rows, build_risk_control,
     OrderRecord, BetGroup,
     ai_result_to_preview,
 )
@@ -312,6 +312,13 @@ def js_risk_rows(records_json, year, odds_json, rebate_json):
     rebate = json.loads(rebate_json)
     rows = build_risk_rows(recs, year, odds, rebate)
     return json.dumps(rows, ensure_ascii=False)
+
+def js_risk_control(records_json, year, odds_json, rebate_json):
+    recs = _rebuild(records_json)
+    odds = json.loads(odds_json)
+    rebate = json.loads(rebate_json)
+    result = build_risk_control(recs, year, odds, rebate)
+    return json.dumps(result, ensure_ascii=False)
 `;
 
 async function initPyodide() {
@@ -370,6 +377,13 @@ async function pyExportXlsx() {
 }
 async function pyRiskRows() {
   return JSON.parse(pyCall("js_risk_rows",
+    JSON.stringify(state.records),
+    yearAnimal(),
+    JSON.stringify(state.odds),
+    JSON.stringify(state.rebate)));
+}
+async function pyRiskControl() {
+  return JSON.parse(pyCall("js_risk_control",
     JSON.stringify(state.records),
     yearAnimal(),
     JSON.stringify(state.odds),
@@ -1344,63 +1358,113 @@ async function refreshRisk() {
     box.innerHTML = '<div class="empty">还没有记录</div>';
     return;
   }
-  box.innerHTML = '<div class="empty">正在计算…</div>';
+  box.innerHTML = '<div class="empty">正在计算平特肖与特码风险…</div>';
   try {
-    const rows = await pyRiskRows();
-    renderRisk(rows);
+    const [rows, control] = await Promise.all([pyRiskRows(), pyRiskControl()]);
+    renderRisk(rows, control);
   } catch(e) {
-    box.innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
+    box.innerHTML = '<div class="empty">计算失败：' + escapeHtml(e.message || String(e)) + '</div>';
   }
 }
 
-function renderRisk(rows) {
+function renderRisk(rows, control) {
   const box = $("#risk-content");
-  if (!rows || rows.length <= 1) {
-    box.innerHTML = '<div class="empty">暂无可分析的特码相关玩法</div>';
-    return;
+  const pingte = control?.pingte_xiao || {};
+  const tema = control?.tema || {};
+  const showValue = value => escapeHtml(
+    typeof value === "number" ? fmtNum(value) : String(value ?? "-")
+  );
+  const metricCard = (label, value, note, className="") =>
+    `<div class="risk-control-card ${className}">
+      <span>${escapeHtml(label)}</span><strong>${showValue(value)}</strong>
+      <small>${escapeHtml(note || "")}</small>
+    </div>`;
+
+  const overviewHtml = `<div class="risk-control-grid">
+    ${metricCard("当前全部下注额", control?.total_stake ?? 0, "沿用现有下注记录")}
+    ${metricCard("平特肖最大预计赔付", pingte.has_bets ? pingte.max_payout : "暂无下注",
+      pingte.has_bets ? "仅按前六个平码生肖，最多六个不同生肖同时命中" : "请先添加平特一肖记录")}
+    ${metricCard("平特肖最差净盈亏", pingte.has_bets ? pingte.worst_net : "暂无下注",
+      pingte.has_bets ? "赔付 + 回水 − 平特肖下注额；正数代表庄家潜在亏损" : "—",
+      typeof pingte.worst_net === "number" && pingte.worst_net > 0 ? "risk-card-high" : "")}
+    ${metricCard("特码最大预计赔付", tema.has_bets ? tema.max_payout : "暂无下注",
+      tema.has_bets ? "逐一模拟特码 01–49" : "请先添加特码、特肖或波色记录")}
+    ${metricCard("特码最差净盈亏", tema.has_bets ? tema.worst_net : "暂无下注",
+      tema.has_bets ? "赔付 + 回水 − 特码相关下注额；正数代表庄家潜在亏损" : "—",
+      typeof tema.worst_net === "number" && tema.worst_net > 0 ? "risk-card-high" : "")}
+  </div>`;
+
+  const ruleNote = `<div class="risk-rule-note">
+    <strong>当前结算口径</strong>
+    平特肖、平特尾及连肖类玩法只统计开奖前六个平码号码对应的生肖/尾数；
+    第七个号码按特码单独结算，不会因为特码生肖本身直接命中平特肖。
+    若同一生肖也出现在前六个平码中，该生肖仍按平码命中。
+  </div>`;
+
+  const zodiacRows = Array.isArray(pingte.rows) ? pingte.rows : [];
+  let pingteTable = '<div class="empty">当前没有可计算的平特肖下注</div>';
+  if (zodiacRows.length > 1) {
+    const h = zodiacRows[0].map(v => `<th>${escapeHtml(v)}</th>`).join("");
+    const b = zodiacRows.slice(1).map(row => {
+      const cells = row.map((v, i) => {
+        const val = showValue(v);
+        const cls = i === 5 && typeof v === "number"
+          ? (v > 0 ? "profit-pos" : "profit-neg") : "";
+        return `<td class="${cls}">${val}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    }).join("");
+    pingteTable = `<div class="table-wrap"><table class="data-table"><thead><tr>${h}</tr></thead><tbody>${b}</tbody></table></div>`;
   }
 
-  const head = rows[0];
+  const head = Array.isArray(rows) && rows.length ? rows[0] : [];
   const profitIndex = head.indexOf("预计盈亏");
   const riskIndex = head.indexOf("风险等级");
   const summaryRow = rows.slice(1).find(r => String(r[0] || "").includes("统计"));
   const bodyRows = rows.slice(1).filter(r => !String(r[0] || "").includes("统计"));
-
-  let summaryHtml = "";
-  if (summaryRow) {
-    summaryHtml = `<div class="risk-summary">
-      <span class="max">📈 最大盈亏：${summaryRow[1] || "-"}</span>
-      <span class="min">📉 最小盈亏：${summaryRow[2] || "-"}</span>
-      <span class="avg">📊 平均：${summaryRow[profitIndex >= 0 ? profitIndex : 3] || "-"}</span>
-    </div>`;
+  let temaTable = '<div class="empty">当前没有特码、特肖或波色下注</div>';
+  if (head.length && bodyRows.length) {
+    let summaryHtml = "";
+    if (summaryRow) {
+      summaryHtml = `<div class="risk-summary">
+        <span class="max">📈 最大盈亏：${showValue(summaryRow[1] || "-")}</span>
+        <span class="min">📉 最小盈亏：${showValue(summaryRow[2] || "-")}</span>
+        <span class="avg">📊 平均：${showValue(summaryRow[profitIndex >= 0 ? profitIndex : 3] || "-")}</span>
+      </div>`;
+    }
+    const th = head.map(h => `<th>${escapeHtml(h)}</th>`).join("");
+    const tr = bodyRows.map(row => {
+      const profit = row[profitIndex >= 0 ? profitIndex : 3];
+      const level = String(row[riskIndex >= 0 ? riskIndex : row.length - 1] || "");
+      let rowCls = "risk-unknown";
+      if (level.includes("🔴") || level.includes("[高]")) rowCls = "risk-high";
+      else if (level.includes("🟡") || level.includes("[中]")) rowCls = "risk-mid";
+      else if (level.includes("🟢") || level.includes("[低]")) rowCls = "risk-low";
+      const profitNum = typeof profit === "number" ? profit : null;
+      const profitCls = profitNum === null ? "" : (profitNum > 0 ? "profit-pos" : "profit-neg");
+      const profitText = profitNum === null ? showValue(profit)
+        : (profitNum > 0 ? "+" : "") + fmtNum(profitNum);
+      const tds = row.map((v, i) => {
+        if (i === profitIndex) return `<td class="${profitCls}">${profitText}</td>`;
+        return `<td>${showValue(v)}</td>`;
+      }).join("");
+      return `<tr class="${rowCls}">${tds}</tr>`;
+    }).join("");
+    temaTable = summaryHtml + `<div class="table-wrap"><table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
   }
 
-  const th = head.map(h => `<th>${h}</th>`).join("");
+  const pingteScenario = pingte.has_bets
+    ? `<p class="risk-scenario"><strong>平特肖最坏组合：</strong>${showValue(pingte.scenario)}</p>` : "";
+  const temaScenario = tema.has_bets
+    ? `<p class="risk-scenario"><strong>特码最高风险号码：</strong>${showValue(tema.scenario)}</p>` : "";
 
-  const tr = bodyRows.map(row => {
-    const profit = row[profitIndex >= 0 ? profitIndex : 3];
-    const level = String(row[riskIndex >= 0 ? riskIndex : row.length - 1] || "");
-    let rowCls = "risk-unknown";
-    if (level.includes("🔴") || level.includes("[高]")) rowCls = "risk-high";
-    else if (level.includes("🟡") || level.includes("[中]")) rowCls = "risk-mid";
-    else if (level.includes("🟢") || level.includes("[低]")) rowCls = "risk-low";
-
-    const profitNum = typeof profit === "number" ? profit : null;
-    const profitCls = profitNum === null ? "" : (profitNum > 0 ? "profit-pos" : "profit-neg");
-    const profitText = profitNum === null ? (profit ?? "-")
-      : (profitNum > 0 ? "+" : "") + fmtNum(profitNum);
-
-    const tds = row.map((v, i) => {
-      if (i === profitIndex) return `<td class="${profitCls}">${profitText}</td>`;
-      return `<td>${typeof v === "number" && !Number.isInteger(v) ? fmtNum(v) : (v ?? "")}</td>`;
-    }).join("");
-
-    return `<tr class="${rowCls}">${tds}</tr>`;
-  }).join("");
-
-  box.innerHTML = summaryHtml
-    + `<div class="table-wrap"><table class="data-table">`
-    + `<thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+  box.innerHTML = overviewHtml + ruleNote
+    + `<section class="risk-control-section"><h3>平特肖风险（只看前六个平码生肖）</h3>
+       <p class="risk-section-desc">每个生肖沿用当前赔率设置计算赔付贡献；整体最坏情景按前六个平码最多出现六个不同生肖估算。</p>
+       ${pingteScenario}${pingteTable}</section>`
+    + `<section class="risk-control-section"><h3>特码风险（逐个假设第七个号码）</h3>
+       <p class="risk-section-desc">特码按 01–49 分别模拟，使用现有特码、特肖和波色赔率设置。平特肖不计入这个表。</p>
+       ${temaScenario}${temaTable}</section>`;
 }
 
 async function onExport() {
