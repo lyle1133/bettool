@@ -1514,23 +1514,29 @@ def parse_draw_result(raw_text: str, year_animal: str) -> DrawResult:
     if not found:
         result.warnings.append("没有识别到 01–49 的开奖号码")
         return result
-    nums: List[int] = []
-    for n in found:
-        if n not in nums:
-            nums.append(n)
-    if len(nums) < len(found):
-        result.warnings.append("开奖号码中存在重复号码，已按唯一号码读取")
+    nums = list(found)
+    if len(nums) < len(set(nums)):
+        result.warnings.append("开奖号码中存在重复号码；已保留原始顺序以免错位识别平码和特码")
+    if len(nums) > 7:
+        result.warnings.append("超过 7 个开奖号码：按前 6 个为平码、第 7 个为特码，忽略其余号码")
+        nums = nums[:7]
     result.numbers = nums
-    result.special = nums[-1]
-    result.pingma_numbers = nums[:-1] if len(nums) >= 2 else []
+    # 正常开奖按位置解释：前六个是平码，第七个才是特码。
+    # 少于七个号码时沿用兼容规则：最后一个号码视为特码。
+    if len(nums) >= 7:
+        result.pingma_numbers = nums[:6]
+        result.special = nums[6]
+    else:
+        result.pingma_numbers = nums[:-1] if len(nums) >= 2 else []
+        result.special = nums[-1]
     result.pingma_set = set(result.pingma_numbers)
     if len(nums) < 7:
-        result.warnings.append("少于 7 个开奖号码：默认最后一个号码为特码")
-    elif len(nums) > 7:
-        result.warnings.append("超过 7 个开奖号码：默认最后一个号码为特码，其余号码也参与平特肖/平特尾")
+        result.warnings.append("少于 7 个开奖号码：默认最后一个号码为特码，平特肖/平特尾/连肖仅统计其前面的号码")
     n_to_z = build_number_to_zodiac(year_animal)
-    result.zodiac_set = {n_to_z[n] for n in nums}
-    result.tail_set = {n % 10 for n in nums}
+    # 平特肖、平特尾、连肖、连尾只使用平码生肖/尾数。
+    # 特码生肖另由 special_zodiac 表示，不直接加入平肖命中集合。
+    result.zodiac_set = {n_to_z[n] for n in result.pingma_numbers}
+    result.tail_set = {n % 10 for n in result.pingma_numbers}
     result.special_zodiac = n_to_z[result.special]
     result.special_tail = result.special % 10
     result.special_color = NUMBER_TO_COLOR[result.special]
@@ -1838,7 +1844,8 @@ def _risk_draw_for_special(n: int, year_animal: str) -> DrawResult:
     tail = int(n) % 10
     return DrawResult(
         raw_text=fmt_code(n), numbers=[int(n)], special=int(n),
-        zodiac_set={z} if z else set(), tail_set={tail},
+        # This is a hypothetical special number, not one of the first six mains.
+        zodiac_set=set(), tail_set=set(),
         pingma_numbers=[], pingma_set=set(),
         special_zodiac=z, special_tail=tail,
         special_color=NUMBER_TO_COLOR.get(int(n), ""), warnings=[])
@@ -1929,6 +1936,181 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
     for _, row in all_data:
         rows.append(row)
     return rows
+
+
+
+def build_risk_control(records: Sequence[OrderRecord], year_animal: str,
+                       odds_config=None, rebate_config=None) -> Dict[str, object]:
+    """
+    Summarize two separate exposures:
+    - 平特肖: worst possible payout when up to six distinct zodiac signs occur among the first six main numbers.
+    - 特码: inspect each of the 49 possible special numbers using the existing settlement rules.
+
+    Net result uses the same house-side convention as the risk table:
+    payout + rebate - total stake. A positive value means a potential house loss.
+    """
+    odds = normalize_odds_config(odds_config)
+    rebate = normalize_rebate_config(rebate_config)
+    number_to_zodiac = build_number_to_zodiac(year_animal)
+    region_names: List[str] = []
+    for record in records:
+        region = getattr(record, "region", detect_region(record.raw_text)) or "澳门"
+        if region not in region_names:
+            region_names.append(region)
+
+    total_stake = sum(float(group.total) for record in records for group in record.groups)
+    pingte_total_stake = 0.0
+    pingte_total_rebate = 0.0
+    pingte_max_payout_total = 0.0
+    pingte_worst_net_total = 0.0
+    pingte_unknown_odds = False
+    pingte_scenarios: List[str] = []
+    pingte_rows: List[List[object]] = [[
+        "地区", "生肖", "该生肖下注额", "赔率", "该生肖预计赔付", "命中该肖的盈亏贡献"
+    ]]
+
+    tema_total_stake = 0.0
+    tema_total_rebate = 0.0
+    tema_max_payout_total = 0.0
+    tema_worst_net_total = 0.0
+    tema_unknown_odds = False
+    tema_scenarios: List[str] = []
+    tema_has_bets = False
+
+    for region in region_names:
+        region_groups = [
+            group
+            for record in records
+            if (getattr(record, "region", detect_region(record.raw_text)) or "澳门") == region
+            for group in record.groups
+        ]
+        pingte_groups = [g for g in region_groups if g.play_type == "平特一肖"]
+        if pingte_groups:
+            pingte_stake = sum(float(g.total) for g in pingte_groups)
+            pingte_rebate = sum(
+                float(g.total) * rebate_rate_for_play(settlement_summary_play_type(g), rebate) / 100.0
+                for g in pingte_groups
+            )
+            pingte_total_stake += pingte_stake
+            pingte_total_rebate += pingte_rebate
+            stakes_by_animal = {animal: 0.0 for animal in ZODIAC_ORDER}
+            payouts_by_animal = {animal: 0.0 for animal in ZODIAC_ORDER}
+            rebates_by_animal = {animal: 0.0 for animal in ZODIAC_ORDER}
+            unknown_by_animal = {animal: False for animal in ZODIAC_ORDER}
+            for group in pingte_groups:
+                animals = _split_selection_animals(group.selection_text)
+                rate = rebate_rate_for_play(settlement_summary_play_type(group), rebate)
+                for animal in animals:
+                    stakes_by_animal[animal] += float(group.amount)
+                    rebates_by_animal[animal] += float(group.amount) * rate / 100.0
+                    animal_odds = _pingte_zodiac_odds(animal, odds)
+                    if animal_odds is None:
+                        unknown_by_animal[animal] = True
+                    else:
+                        payouts_by_animal[animal] += float(group.amount) * float(animal_odds)
+
+            for animal in ZODIAC_ORDER:
+                animal_stake = stakes_by_animal[animal]
+                if animal_stake <= 0:
+                    continue
+                animal_odds = _pingte_zodiac_odds(animal, odds)
+                missing = unknown_by_animal[animal]
+                animal_payout: object = "待填赔率" if missing else payouts_by_animal[animal]
+                contribution: object = "待填赔率" if missing else (
+                    payouts_by_animal[animal] + rebates_by_animal[animal] - animal_stake
+                )
+                pingte_rows.append([
+                    region, animal, animal_stake, _odds_label(animal_odds),
+                    animal_payout, contribution
+                ])
+
+            selected = [animal for animal in ZODIAC_ORDER if stakes_by_animal[animal] > 0]
+            if any(unknown_by_animal[animal] for animal in selected):
+                pingte_unknown_odds = True
+                pingte_scenarios.append(f"{region}：待填赔率")
+            else:
+                # Any six distinct zodiac signs can occur in the six main numbers.
+                # Sort by their combined payout contribution to produce the worst payout scenario.
+                selected.sort(key=lambda animal: (-payouts_by_animal[animal], ZODIAC_ORDER.index(animal)))
+                worst_animals = selected[:6]
+                worst_payout = sum(payouts_by_animal[animal] for animal in worst_animals)
+                pingte_max_payout_total += worst_payout
+                pingte_worst_net_total += worst_payout + pingte_rebate - pingte_stake
+                pingte_scenarios.append(f"{region}：" + ("、".join(worst_animals) if worst_animals else "无命中生肖"))
+
+        tema_groups = [
+            g for g in region_groups
+            if settlement_summary_play_type(g) in {"特码总单", "特肖", "各肖", "波色"}
+        ]
+        if tema_groups:
+            tema_has_bets = True
+            tema_stake = sum(float(g.total) for g in tema_groups)
+            tema_rebate = sum(
+                float(g.total) * rebate_rate_for_play(settlement_summary_play_type(g), rebate) / 100.0
+                for g in tema_groups
+            )
+            tema_total_stake += tema_stake
+            tema_total_rebate += tema_rebate
+            outcomes = []
+            has_unknown = False
+            for special_number in range(1, 50):
+                draw = _risk_draw_for_special(special_number, year_animal)
+                payout_total = 0.0
+                unknown_hit = False
+                for group in tema_groups:
+                    hit, _desc, _stake, _odds_text, payout, _profit = settle_group(group, draw, odds)
+                    if hit and payout is None:
+                        unknown_hit = True
+                    elif payout is not None:
+                        payout_total += float(payout or 0.0)
+                if unknown_hit:
+                    has_unknown = True
+                else:
+                    net = payout_total + tema_rebate - tema_stake
+                    outcomes.append((payout_total, net, special_number))
+            if has_unknown or not outcomes:
+                tema_unknown_odds = True
+                tema_scenarios.append(f"{region}：待填赔率")
+            else:
+                max_payout, worst_net, worst_number = max(outcomes, key=lambda row: (row[0], row[1]))
+                tema_max_payout_total += max_payout
+                tema_worst_net_total += worst_net
+                tema_scenarios.append(f"{region}：{fmt_code(worst_number)}")
+
+    if pingte_unknown_odds:
+        pingte_max_payout: object = "待填赔率"
+        pingte_worst_net: object = "待填赔率"
+    else:
+        pingte_max_payout = pingte_max_payout_total
+        pingte_worst_net = pingte_worst_net_total
+
+    if tema_unknown_odds:
+        tema_max_payout: object = "待填赔率"
+        tema_worst_net: object = "待填赔率"
+    else:
+        tema_max_payout = tema_max_payout_total
+        tema_worst_net = tema_worst_net_total
+
+    return {
+        "total_stake": total_stake,
+        "pingte_xiao": {
+            "has_bets": pingte_total_stake > 0,
+            "stake": pingte_total_stake,
+            "rebate": pingte_total_rebate,
+            "max_payout": pingte_max_payout,
+            "worst_net": pingte_worst_net,
+            "scenario": "；".join(pingte_scenarios) if pingte_scenarios else "暂无平特肖下注",
+            "rows": pingte_rows,
+        },
+        "tema": {
+            "has_bets": tema_has_bets,
+            "stake": tema_total_stake,
+            "rebate": tema_total_rebate,
+            "max_payout": tema_max_payout,
+            "worst_net": tema_worst_net,
+            "scenario": "；".join(tema_scenarios) if tema_scenarios else "暂无特码相关下注",
+        },
+    }
 
 
 # =========================== XLSX 导出 ===========================
