@@ -174,6 +174,18 @@ textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 
 .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px}
 .table-wrap table.data-table{min-width:780px}
 .risk-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:0;margin:0 0 10px;background:transparent;font-size:11px}
+.risk-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0 0 12px}
+.risk-control-card{display:flex;flex-direction:column;gap:6px;padding:12px;background:#fff;border:1px solid var(--border);border-radius:10px;min-width:0}
+.risk-control-card span{font-size:12px;color:var(--muted);line-height:1.4}
+.risk-control-card strong{font-size:20px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+.risk-control-card small{font-size:11px;color:var(--muted);line-height:1.45}
+.risk-control-card.risk-card-high{border-color:#fca5a5;background:#fff7f7}
+.risk-control-section{margin-top:14px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:12px}
+.risk-control-section h3{font-size:15px;margin:0 0 8px;color:var(--text)}
+.risk-section-desc,.risk-scenario{font-size:12px;color:var(--muted);line-height:1.5;margin:6px 0 10px}
+.risk-rule-note{margin:0 0 12px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;color:#78350f;font-size:12px;line-height:1.6}
+.risk-rule-note strong{display:block;margin-bottom:3px}
+
 .risk-summary span{padding:10px;background:var(--panel);border:1px solid var(--border);border-radius:10px;line-height:1.45}
 .risk-summary .max{color:#ff9a9a}.risk-summary .min{color:#8ee4b5}.risk-summary .avg{color:#91bbff}
 tr.risk-high td:last-child{color:#ff8c8c;font-weight:800}tr.risk-mid td:last-child{color:#ffd166;font-weight:800}tr.risk-low td:last-child{color:#7ce3aa;font-weight:800}tr.risk-unknown td:last-child{color:var(--muted)}
@@ -317,6 +329,11 @@ button.secondary{background:#F3F4F6;color:#1F2937;border-color:#E5E7EB}
 button.secondary:hover{background:#E5E7EB}
 button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid rgba(37,99,235,.28);outline-offset:2px}
 @media(max-width:600px){
+  .risk-control-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .risk-control-card{padding:9px}
+  .risk-control-card strong{font-size:17px}
+  .risk-control-section{padding:9px}
+
   header.app-header{gap:7px;padding:9px 10px}
   .brand-mark{display:none}
   .brand-copy h1{font-size:13px;line-height:1.25}
@@ -658,7 +675,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   <button data-tab="settings" onclick="switchTab('settings')">设置</button>
 </nav>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 <script src="learning.js?v=4"></script>
 </body>
 </html>
