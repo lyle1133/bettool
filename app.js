@@ -1538,6 +1538,14 @@ function renderSettings() {
   `;
 
   const html = [apiKeyHtml, `<div style="padding:8px;color:var(--muted);font-size:12px">${hint}</div>`];
+  if (currentSettingsTab === "odds") {
+    html.push(`<div style="padding:10px 12px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;background:var(--card2);font-size:12px;line-height:1.6;color:var(--muted)">
+      <strong style="color:var(--text)">结算规则：</strong>
+      平特0尾按前六个平码中是否出现 0 尾结算；其他平特尾按对应尾数的赔率结算。
+      五/六/七不中按全部七个开奖号码（六个平码 + 第七个特码）判断，任何一个所选号码开出即未中。
+      “带本”赔率的总赔付按下注额 × 赔率计算，净盈亏 = 总赔付 − 投注额；五/六/七不中赔率需按你的实际规则填写。
+    </div>`);
+  }
   for (const [key, label] of items) {
     const v = cfg[key];
     const text = v === null || v === undefined ? "" : fmtNum(v);
