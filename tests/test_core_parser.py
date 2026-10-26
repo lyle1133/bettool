@@ -100,6 +100,28 @@ class CoreParserRegressionTests(unittest.TestCase):
         self.assertEqual(group.total, 30)
         self.assertFalse(parsed.warnings, parsed.warnings)
 
+    def test_multiline_combo_parser_normalizes_fullwidth_numbers_and_blank_lines(self):
+        parsed = parse_bet(
+            "３中３\n"
+            "\n"
+            "４５－０５－２２\n"
+            "\n"
+            "２３－２６－１７\n"
+            "３９－２１－３８\n"
+            "各组十元"
+        )
+        self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+        group = parsed.groups[0]
+        self.assertEqual(group.play_type, "三中三")
+        self.assertEqual(
+            group.selection_text,
+            "45-05-22;23-26-17;39-21-38",
+        )
+        self.assertEqual(group.multiplier, 3)
+        self.assertEqual(group.amount, 10)
+        self.assertEqual(group.total, 30)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
     def test_prefixed_three_of_three_format(self):
         parsed = parse_bet("平码复式三中三\n45-05-22\n23-26-17各组10")
         self.assertEqual(len(parsed.groups), 1, parsed.warnings)
