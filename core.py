@@ -1201,7 +1201,18 @@ def _parse_multiline_pingma_blocks(
     if not (raw_text or "").strip():
         return [], [], raw_text or ""
 
-    lines = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    # 此函数在 preprocess_text() 之前运行，因此先在这里做必要的数字和横线归一化。
+    # 否则全角号码（如“４５”）或中文输入法横线会导致分行组合漏识别。
+    normalized_raw = (raw_text or "").translate(
+        str.maketrans("０１２３４５６７８９", "0123456789")
+    )
+    normalized_raw = (
+        normalized_raw.replace("～", "~")
+        .replace("—", "~")
+        .replace("–", "~")
+        .replace("－", "-")
+    )
+    lines = normalized_raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     consumed: Set[int] = set()
     groups: List[BetGroup] = []
     warnings: List[str] = []
@@ -1327,6 +1338,15 @@ def _parse_multiline_pingma_blocks(
 
         # 继续向下读取后续号码组，直到遇到金额或非组行
         while amount is None and j < len(lines):
+            if not lines[j].strip():
+                # 聊天记录中可能在组合号码行之间夹空行；仅当下一行仍可识别
+                # 为号码组或单独金额行时才跳过，避免跨过区块边界。
+                if j + 1 < len(lines):
+                    next_group, next_amount = _parse_group_line(lines[j + 1], choose)
+                    if next_group is not None or next_amount is not None:
+                        j += 1
+                        continue
+                break
             group_text, line_amount = _parse_group_line(lines[j], choose)
             if group_text is None:
                 # 支持“号码组逐行列出，最后单独一行写各组金额”的格式。
