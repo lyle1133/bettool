@@ -1238,10 +1238,26 @@ def _parse_multiline_pingma_blocks(
         # 例如“三中三\n45 05 22\n23 26 17各组10”。
         # 不接受无分隔的连续数字，避免把号码和金额误拼成号码。
         number_separator = r"(?:\s*[-~,.，、/]\s*|\s+)"
-        group_pat = (
-            rf"(?P<nums>{num_pat}"
-            rf"(?:{number_separator}{num_pat}){{{choose - 1}}})"
-        )
+        # 同一行可连续列出多个组合；稍后会验证号码数量是玩法组数的整数倍。
+        group_pat = rf"(?P<nums>{num_pat}(?:{number_separator}{num_pat})*)"
+
+        def _format_combo_sequence(raw_numbers: str) -> Optional[str]:
+            nums_raw = [
+                token for token in re.split(
+                    r"\s*[-~,.，、/]\s*|\s+", (raw_numbers or "").strip()
+                ) if token
+            ]
+            if len(nums_raw) < choose or len(nums_raw) % choose != 0:
+                return None
+            try:
+                nums = [fmt_code(int(token)) for token in nums_raw]
+            except (TypeError, ValueError):
+                return None
+            combos = [
+                "-".join(nums[index:index + choose])
+                for index in range(0, len(nums), choose)
+            ]
+            return ";".join(combos)
         amount_pat = (
             rf"(?:各组|每组|各|组)\s*"
             rf"(?P<amount>\d+(?:\.\d+)?|{CN_NUMBER_RE})"
@@ -1252,8 +1268,9 @@ def _parse_multiline_pingma_blocks(
         # 形如：39-21-38各组10
         m = re.fullmatch(rf"\s*{group_pat}\s*{amount_pat}\s*", s)
         if m:
-            nums_raw = re.split(r"\s*[-~,.，、/]\s*|\s+", m.group("nums").strip())
-            nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
+            combo_text = _format_combo_sequence(m.group("nums"))
+            if not combo_text:
+                return None, None
             amount_raw = m.group("amount")
             try:
                 amount = (
@@ -1261,16 +1278,16 @@ def _parse_multiline_pingma_blocks(
                     if re.fullmatch(CN_NUMBER_RE, amount_raw or "")
                     else float(amount_raw)
                 )
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return None, None
-            return "-".join(nums), amount
+            return combo_text, amount
 
         # 形如：45-05-22（无金额）
         m = re.fullmatch(rf"\s*{group_pat}\s*", s)
         if m:
-            nums_raw = re.split(r"\s*[-~,.，、/]\s*|\s+", m.group("nums").strip())
-            nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
-            return "-".join(nums), None
+            combo_text = _format_combo_sequence(m.group("nums"))
+            if combo_text:
+                return combo_text, None
 
         # 也允许把“各组10”或“每组十元”单独写在区块最后一行。
         m = re.fullmatch(rf"\s*{amount_pat}\s*", s)
@@ -1304,7 +1321,7 @@ def _parse_multiline_pingma_blocks(
         if inline_tail and inline_tail.strip():
             group_text, line_amount = _parse_group_line(inline_tail, choose)
             if group_text:
-                block_groups.append(group_text)
+                block_groups.extend(group_text.split(";"))
                 if line_amount is not None:
                     amount = line_amount
 
@@ -1318,7 +1335,7 @@ def _parse_multiline_pingma_blocks(
                     amount = line_amount
                     j += 1
                 break
-            block_groups.append(group_text)
+            block_groups.extend(group_text.split(";"))
             if line_amount is not None:
                 amount = line_amount
                 j += 1
