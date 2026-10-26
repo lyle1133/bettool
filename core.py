@@ -1234,9 +1234,13 @@ def _parse_multiline_pingma_blocks(
         if not s:
             return None, None
 
+        # 号码组之间除连字符、逗号、斜杠外，也允许聊天软件常见的空格分隔：
+        # 例如“三中三\n45 05 22\n23 26 17各组10”。
+        # 不接受无分隔的连续数字，避免把号码和金额误拼成号码。
+        number_separator = r"(?:\s*[-~,.，、/]\s*|\s+)"
         group_pat = (
             rf"(?P<nums>{num_pat}"
-            rf"(?:\s*[-~,.，、/]\s*{num_pat}){{{choose - 1}}})"
+            rf"(?:{number_separator}{num_pat}){{{choose - 1}}})"
         )
         amount_pat = (
             rf"(?:各组|每组|各|组)\s*"
@@ -1247,7 +1251,7 @@ def _parse_multiline_pingma_blocks(
         # 形如：39-21-38各组10
         m = re.fullmatch(rf"\s*{group_pat}\s*{amount_pat}\s*", s)
         if m:
-            nums_raw = re.split(r"\s*[-~,.，、/]\s*", m.group("nums"))
+            nums_raw = re.split(r"\s*[-~,.，、/]\s*|\s+", m.group("nums").strip())
             nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
             amount_raw = m.group("amount")
             try:
@@ -1263,7 +1267,7 @@ def _parse_multiline_pingma_blocks(
         # 形如：45-05-22（无金额）
         m = re.fullmatch(rf"\s*{group_pat}\s*", s)
         if m:
-            nums_raw = re.split(r"\s*[-~,.，、/]\s*", m.group("nums"))
+            nums_raw = re.split(r"\s*[-~,.，、/]\s*|\s+", m.group("nums").strip())
             nums = [fmt_code(int(n)) for n in nums_raw if n.strip()]
             return "-".join(nums), None
 
