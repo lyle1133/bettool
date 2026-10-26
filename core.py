@@ -1247,6 +1247,27 @@ def _parse_multiline_pingma_blocks(
             rf"(?P<amount>\d+(?:\.\d+)?|{CN_NUMBER_RE})"
             rf"(?:\s*(?:元|块|米|斤|钱|片|文|闷|门|点))?"
         )
+        # 有些真实下注文本会把“各组10”单独放在最后一行，而不是
+        # 附在最后一组号码后面。只在已经收集到号码组时接受该金额行。
+        standalone_amount_pat = re.compile(
+            rf"\s*(?:各组|每组|各|组)\s*"
+            rf"(?P<amount>\d+(?:\.\d+)?|{CN_NUMBER_RE})"
+            rf"(?:\s*(?:元|块|米|斤|钱|片|文|闷|门|点))?\s*"
+        )
+
+        def _parse_standalone_amount(line: str) -> Optional[float]:
+            match = standalone_amount_pat.fullmatch(line or "")
+            if not match:
+                return None
+            raw_amount = match.group("amount")
+            try:
+                return (
+                    float(cn_to_number(raw_amount))
+                    if re.fullmatch(CN_NUMBER_RE, raw_amount or "")
+                    else float(raw_amount)
+                )
+            except (TypeError, ValueError, OverflowError):
+                return None
 
         # 形如：39-21-38各组10
         m = re.fullmatch(rf"\s*{group_pat}\s*{amount_pat}\s*", s)
@@ -1297,6 +1318,12 @@ def _parse_multiline_pingma_blocks(
         while amount is None and j < len(lines):
             group_text, line_amount = _parse_group_line(lines[j], choose)
             if group_text is None:
+                # 支持“号码组逐行列出，最后单独一行写各组金额”的格式。
+                # 若当前区块还没有号码组，不将孤立金额当作有效下注。
+                standalone_amount = _parse_standalone_amount(lines[j])
+                if block_groups and standalone_amount is not None:
+                    amount = standalone_amount
+                    j += 1
                 break
             block_groups.append(group_text)
             if line_amount is not None:
