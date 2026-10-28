@@ -154,9 +154,12 @@ let previewTimer = null;
 let currentSubtab = "numbers";
 let currentSettingsTab = "odds";
 
+let riskExtraIdCounter = 0;
+
 const state = {
   year: "马年（2026 默认）",
   records: [],
+  riskExtras: [],
   odds: { ...DEFAULT_ODDS },
   rebate: { ...DEFAULT_REBATE },
   currentUser: "A",
@@ -196,6 +199,7 @@ function saveLocal() {
     localStorage.setItem(LS_KEY, JSON.stringify({
       year: state.year,
       records: state.records,
+      riskExtras: state.riskExtras,
       odds: state.odds,
       rebate: state.rebate,
       currentUser: state.currentUser,
@@ -213,6 +217,9 @@ function loadLocal() {
     const data = JSON.parse(raw);
     if (data.year) state.year = data.year;
     if (Array.isArray(data.records)) state.records = data.records;
+    if (Array.isArray(data.riskExtras)) {
+      state.riskExtras = data.riskExtras.map(normalizeRiskExtraEntry).filter(Boolean);
+    }
     if (data.odds) {
       state.odds = { ...DEFAULT_ODDS, ...data.odds };
       // Migrate only legacy blank general-tail odds to the published 1.85 rule.
@@ -383,16 +390,16 @@ async function pyExportXlsx() {
     $("#macau-draw").value, $("#hk-draw").value, yearAnimal(),
     JSON.stringify(state.odds), JSON.stringify(state.rebate));
 }
-async function pyRiskRows() {
+async function pyRiskRows(records = state.records) {
   return JSON.parse(pyCall("js_risk_rows",
-    JSON.stringify(state.records),
+    JSON.stringify(records),
     yearAnimal(),
     JSON.stringify(state.odds),
     JSON.stringify(state.rebate)));
 }
-async function pyRiskControl() {
+async function pyRiskControl(records = state.records) {
   return JSON.parse(pyCall("js_risk_control",
-    JSON.stringify(state.records),
+    JSON.stringify(records),
     yearAnimal(),
     JSON.stringify(state.odds),
     JSON.stringify(state.rebate)));
