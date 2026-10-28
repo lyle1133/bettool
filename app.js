@@ -1543,8 +1543,8 @@ function renderRiskDeductionEditor(riskInfo = {}) {
     '<h3>抛掉金额（实时风险扣减）</h3>' +
     '<p class="risk-section-desc">例如：01 原本下注 100，填写号码 01、抛掉金额 90，风险计算会按 01 剩余下注 10 模拟。金额是每个所选号码各扣多少；最多扣到 0。此设置只影响风险页，真实记录、汇总、中奖结算和导出不变，保存在当前浏览器。</p>' +
     '<div class="risk-deduction-fields">' +
-      '<label>抛掉的号码<input id="risk-deduction-numbers" type="text" inputmode="numeric" placeholder="例如：01 或 01, 08, 19"></label>' +
-      '<label>每个号码抛掉金额<input id="risk-deduction-amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="例如：90"></label>' +
+      '<label>抛掉的号码<input id="risk-deduction-numbers" type="text" inputmode="text" placeholder="例如：01 或 01, 08, 19"></label>' +
+      '<label>每个号码抛掉金额<input id="risk-deduction-amount" type="text" inputmode="text" autocomplete="off" placeholder="例如：90"></label>' +
       '<label>地区<select id="risk-deduction-region"><option value="澳门">澳门</option><option value="香港">香港</option></select></label>' +
     '</div>' +
     '<button type="button" class="primary full risk-deduction-add" onclick="addRiskDeduction()">加入并立即重算风险</button>' +
@@ -1804,7 +1804,7 @@ function renderSettings() {
     const text = v === null || v === undefined ? "" : fmtNum(v);
     html.push(`<div class="setting-row">
       <label>${label}</label>
-      <input type="number" step="0.01" data-key="${key}" value="${text}" inputmode="decimal">
+      <input type="text" inputmode="text" autocomplete="off" data-key="${key}" value="${text}">
       <span class="unit">${unit}</span>
     </div>`);
   }
