@@ -26,6 +26,7 @@ jobs:
           node --check learning.js
           node tests/test_learning_logic.js
           node tests/test_ai_resilience.js
+          node tests/test_risk_deductions.js
       - name: Run parser regression tests
         run: python -m unittest discover -s tests -v
       - name: Test private cloud-sync Worker
