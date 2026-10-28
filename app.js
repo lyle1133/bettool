@@ -154,12 +154,12 @@ let previewTimer = null;
 let currentSubtab = "numbers";
 let currentSettingsTab = "odds";
 
-let riskExtraIdCounter = 0;
+let riskDeductionIdCounter = 0;
 
 const state = {
   year: "马年（2026 默认）",
   records: [],
-  riskExtras: [],
+  riskDeductions: [],
   odds: { ...DEFAULT_ODDS },
   rebate: { ...DEFAULT_REBATE },
   currentUser: "A",
@@ -199,7 +199,7 @@ function saveLocal() {
     localStorage.setItem(LS_KEY, JSON.stringify({
       year: state.year,
       records: state.records,
-      riskExtras: state.riskExtras,
+      riskDeductions: state.riskDeductions,
       odds: state.odds,
       rebate: state.rebate,
       currentUser: state.currentUser,
@@ -217,9 +217,11 @@ function loadLocal() {
     const data = JSON.parse(raw);
     if (data.year) state.year = data.year;
     if (Array.isArray(data.records)) state.records = data.records;
-    if (Array.isArray(data.riskExtras)) {
-      state.riskExtras = data.riskExtras.map(normalizeRiskExtraEntry).filter(Boolean);
-    }
+    const savedRiskDeductions = Array.isArray(data.riskDeductions)
+      ? data.riskDeductions
+      : (Array.isArray(data.riskExtras) ? data.riskExtras : []);
+    state.riskDeductions = savedRiskDeductions
+      .map(normalizeRiskDeductionEntry).filter(Boolean);
     if (data.odds) {
       state.odds = { ...DEFAULT_ODDS, ...data.odds };
       // Migrate only legacy blank general-tail odds to the published 1.85 rule.
@@ -1364,25 +1366,267 @@ async function refreshWin() {
   }
 }
 
-// ==================== 风险页 ====================
+// ==================== 风险页：抛掉金额调整 ====================
+function normalizeRiskDeductionEntry(entry, index = 0) {
+  if (!entry || typeof entry !== "object") return null;
+  const numbers = [...new Set((Array.isArray(entry.numbers) ? entry.numbers : [])
+    .map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= 49))];
+  const amount = Number(entry.amount);
+  if (!numbers.length || !Number.isFinite(amount) || amount <= 0) return null;
+  const rawId = Number(entry.id);
+  const id = Number.isSafeInteger(rawId) && rawId > 0
+    ? rawId : Date.now() + index + 1;
+  return {
+    id,
+    numbers,
+    amount,
+    region: entry.region === "香港" ? "香港" : "澳门"
+  };
+}
+
+function parseRiskDeductionNumbers(raw) {
+  const text = String(raw || "")
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .trim();
+  if (!text) throw new Error("请填写需要抛掉金额的号码");
+  const tokens = text.split(/[\s,，、;；/|~\-—–]+/).filter(Boolean);
+  if (!tokens.length || tokens.some(token => !/^\d{1,2}$/.test(token))) {
+    throw new Error("号码格式不正确，请用空格、逗号或短横线分隔，例如 01, 08, 19");
+  }
+  const numbers = tokens.map(Number);
+  if (numbers.some(n => !Number.isInteger(n) || n < 1 || n > 49)) {
+    throw new Error("号码必须在 01–49 之间");
+  }
+  return [...new Set(numbers)];
+}
+
+function calculateRiskDeductions() {
+  const deductions = (Array.isArray(state.riskDeductions) ? state.riskDeductions : [])
+    .map(normalizeRiskDeductionEntry).filter(Boolean);
+  const queues = new Map();
+  const entryStats = {};
+  const numberState = {};
+  let totalRequested = 0;
+  let totalApplied = 0;
+
+  const numberKey = (region, number) => region + "|" + number;
+  for (const entry of deductions) {
+    const requested = entry.amount * entry.numbers.length;
+    entryStats[String(entry.id)] = { requested, applied: 0, byNumber: {} };
+    totalRequested += requested;
+    for (const number of entry.numbers) {
+      const key = numberKey(entry.region, number);
+      if (!queues.has(key)) queues.set(key, []);
+      queues.get(key).push({ entryId: String(entry.id), number, remaining: entry.amount });
+      entryStats[String(entry.id)].byNumber[String(number)] = {
+        requested: entry.amount, applied: 0
+      };
+    }
+  }
+
+  let perNumberOriginalStake = 0;
+  const adjustedRecords = state.records.map(record => {
+    const region = record.region === "香港" ? "香港" : "澳门";
+    const adjustedGroups = [];
+    for (const group of (Array.isArray(record.groups) ? record.groups : [])) {
+      const isPerNumberBet = group &&
+        group.play_type === "特码总单" &&
+        group.billing_mode === "per_number" &&
+        Array.isArray(group.numbers) &&
+        group.numbers.length > 0;
+
+      if (!isPerNumberBet) {
+        adjustedGroups.push({ ...group });
+        continue;
+      }
+
+      const baseAmount = Number(group.amount);
+      if (!Number.isFinite(baseAmount) || baseAmount <= 0) continue;
+      for (const rawNumber of group.numbers) {
+        const number = Number(rawNumber);
+        if (!Number.isInteger(number) || number < 1 || number > 49) continue;
+        const key = numberKey(region, number);
+        if (!numberState[key]) {
+          numberState[key] = { region, number, original: 0, applied: 0, remaining: 0 };
+        }
+        numberState[key].original += baseAmount;
+        perNumberOriginalStake += baseAmount;
+
+        let remainingAmount = baseAmount;
+        const queue = queues.get(key) || [];
+        for (const item of queue) {
+          if (remainingAmount <= 0.000000001) break;
+          if (item.remaining <= 0.000000001) continue;
+          const applied = Math.min(remainingAmount, item.remaining);
+          item.remaining = Math.max(0, item.remaining - applied);
+          remainingAmount = Math.max(0, remainingAmount - applied);
+          const stat = entryStats[item.entryId];
+          stat.applied += applied;
+          stat.byNumber[String(number)].applied += applied;
+          numberState[key].applied += applied;
+          totalApplied += applied;
+        }
+
+        numberState[key].remaining += remainingAmount;
+        if (remainingAmount > 0.000000001) {
+          adjustedGroups.push({
+            ...group,
+            numbers: [number],
+            amount: remainingAmount,
+            total: remainingAmount,
+            multiplier: 1,
+            selection_text: String(number).padStart(2, "0")
+          });
+        }
+      }
+    }
+
+    const amount = adjustedGroups.reduce((sum, group) => {
+      const groupNumbers = Array.isArray(group.numbers) ? group.numbers : [];
+      const unitAmount = Number(group.amount) || 0;
+      const multiplier = Number(group.multiplier) || 1;
+      return sum + (group.billing_mode === "per_number"
+        ? groupNumbers.length * unitAmount
+        : multiplier * unitAmount);
+    }, 0);
+    return { ...record, groups: adjustedGroups, amount };
+  });
+
+  return {
+    records: adjustedRecords,
+    entries: deductions,
+    entryStats,
+    numberState,
+    originalStake: state.records.reduce((sum, record) =>
+      sum + Number(record.amount || 0), 0),
+    perNumberOriginalStake,
+    totalRequested,
+    totalApplied,
+    totalUnapplied: Math.max(0, totalRequested - totalApplied)
+  };
+}
+
+function renderRiskDeductionEditor(riskInfo = {}) {
+  const entries = (Array.isArray(state.riskDeductions) ? state.riskDeductions : [])
+    .map(normalizeRiskDeductionEntry).filter(Boolean);
+  const stats = riskInfo.entryStats || {};
+  const numberState = riskInfo.numberState || {};
+  const list = entries.length
+    ? '<div class="risk-deduction-list">' + entries.map(entry => {
+        const stat = stats[String(entry.id)] || {
+          requested: entry.amount * entry.numbers.length, applied: 0, byNumber: {}
+        };
+        const numberNotes = entry.numbers.map(number => {
+          const numberStat = stat.byNumber[String(number)] || {
+            requested: entry.amount, applied: 0
+          };
+          const stateForNumber = numberState[entry.region + "|" + number];
+          const left = stateForNumber ? stateForNumber.remaining : 0;
+          return String(number).padStart(2, "0") + "：抛掉 " + fmtNum(entry.amount) +
+            "，实际抵扣 " + fmtNum(numberStat.applied) +
+            "，剩余数字下注 " + fmtNum(left);
+        }).join("；");
+        return '<div class="risk-deduction-row">' +
+          '<div class="risk-deduction-main">' +
+            '<strong>' + escapeHtml(entry.region + " · " + entry.numbers.map(n => String(n).padStart(2, "0")).join("、")) + '</strong>' +
+            '<span>每个号码抛掉 ' + escapeHtml(fmtNum(entry.amount)) + '；' + escapeHtml(numberNotes) + '</span>' +
+            '<small>已抵扣 ' + escapeHtml(fmtNum(stat.applied)) + ' / ' +
+              escapeHtml(fmtNum(stat.requested)) + '，未匹配金额 ' +
+              escapeHtml(fmtNum(Math.max(0, stat.requested - stat.applied))) + '</small>' +
+          '</div>' +
+          '<button type="button" class="secondary" onclick="removeRiskDeduction(' + entry.id + ')">移除</button>' +
+        '</div>';
+      }).join("") + '</div>'
+    : '<div class="field-help risk-deduction-empty">暂无抛掉金额调整。</div>';
+
+  return '<section class="risk-control-section risk-deduction-editor">' +
+    '<h3>抛掉金额（实时风险扣减）</h3>' +
+    '<p class="risk-section-desc">例如：01 原本下注 100，填写号码 01、抛掉金额 90，风险计算会按 01 剩余下注 10 模拟。金额是每个所选号码各扣多少；最多扣到 0。此设置只影响风险页，真实记录、汇总、中奖结算和导出不变，保存在当前浏览器。</p>' +
+    '<div class="risk-deduction-fields">' +
+      '<label>抛掉的号码<input id="risk-deduction-numbers" type="text" inputmode="numeric" placeholder="例如：01 或 01, 08, 19"></label>' +
+      '<label>每个号码抛掉金额<input id="risk-deduction-amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="例如：90"></label>' +
+      '<label>地区<select id="risk-deduction-region"><option value="澳门">澳门</option><option value="香港">香港</option></select></label>' +
+    '</div>' +
+    '<button type="button" class="primary full risk-deduction-add" onclick="addRiskDeduction()">加入并立即重算风险</button>' +
+    list +
+    '<p class="field-help risk-deduction-summary">本次请求抛掉 ' + escapeHtml(fmtNum(riskInfo.totalRequested || 0)) +
+    '；实际抵扣 ' + escapeHtml(fmtNum(riskInfo.totalApplied || 0)) +
+    '；未匹配 ' + escapeHtml(fmtNum(riskInfo.totalUnapplied || 0)) +
+    '。只从按号码计费的下注组扣减，不改动特肖、平码组合、平特尾等其他玩法的结算口径。</p>' +
+  '</section>';
+}
+
+function addRiskDeduction() {
+  const numbersInput = $("#risk-deduction-numbers");
+  const amountInput = $("#risk-deduction-amount");
+  const regionInput = $("#risk-deduction-region");
+  if (!numbersInput || !amountInput || !regionInput) return;
+  let numbers;
+  try {
+    numbers = parseRiskDeductionNumbers(numbersInput.value);
+  } catch (e) {
+    toast(e.message);
+    numbersInput.focus();
+    return;
+  }
+  const amount = Number(amountInput.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    toast("每个号码抛掉金额必须大于 0");
+    amountInput.focus();
+    return;
+  }
+  const entry = normalizeRiskDeductionEntry({
+    id: Date.now() + (++riskDeductionIdCounter),
+    numbers,
+    amount,
+    region: regionInput.value
+  });
+  if (!entry) {
+    toast("号码或金额不正确，请检查后重试");
+    return;
+  }
+  state.riskDeductions.push(entry);
+  saveLocal();
+  numbersInput.value = "";
+  amountInput.value = "";
+  toast("已加入抛掉金额，正在重算风险");
+  refreshRisk();
+}
+
+function removeRiskDeduction(id) {
+  const numericId = Number(id);
+  if (!state.riskDeductions.some(entry => Number(entry.id) === numericId)) return;
+  if (!confirm("移除此抛掉金额调整？将按剩余调整重新计算风险。")) return;
+  state.riskDeductions = state.riskDeductions.filter(entry => Number(entry.id) !== numericId);
+  saveLocal();
+  refreshRisk();
+}
+
 async function refreshRisk() {
   if (!coreReady) return;
   const box = $("#risk-content");
   if (!box) return;
+  const riskInfo = calculateRiskDeductions();
   if (!state.records.length) {
-    box.innerHTML = '<div class="empty">还没有记录</div>';
+    box.innerHTML = renderRiskDeductionEditor(riskInfo) +
+      '<div class="empty">还没有真实下注记录，已保存的抛掉金额将在录入相应号码后参与风险计算。</div>';
     return;
   }
-  box.innerHTML = '<div class="empty">正在计算平特肖与特码风险…</div>';
+  box.innerHTML = renderRiskDeductionEditor(riskInfo) +
+    '<div class="empty">正在计算风险…</div>';
   try {
-    const [rows, control] = await Promise.all([pyRiskRows(), pyRiskControl()]);
-    renderRisk(rows, control);
+    const [rows, control] = await Promise.all([
+      pyRiskRows(riskInfo.records),
+      pyRiskControl(riskInfo.records)
+    ]);
+    renderRisk(rows, control, riskInfo);
   } catch(e) {
-    box.innerHTML = '<div class="empty">计算失败：' + escapeHtml(e.message || String(e)) + '</div>';
+    box.innerHTML = renderRiskDeductionEditor(riskInfo) +
+      '<div class="empty">计算失败：' + escapeHtml(e.message || String(e)) + '</div>';
   }
 }
 
-function renderRisk(rows, control) {
+function renderRisk(rows, control, riskInfo = {}) {
   const box = $("#risk-content");
   const pingte = control?.pingte_xiao || {};
   const tema = control?.tema || {};
@@ -1396,7 +1640,9 @@ function renderRisk(rows, control) {
     </div>`;
 
   const overviewHtml = `<div class="risk-control-grid">
-    ${metricCard("当前全部下注额", control?.total_stake ?? 0, "沿用现有下注记录")}
+    ${metricCard("真实记录下注额", riskInfo.originalStake ?? 0, "不会因抛掉调整而改变")}
+    ${metricCard("抛掉后风险计入额", control?.total_stake ?? 0,
+      "已按号码抛掉金额扣减；未匹配金额不会虚减风险")}
     ${metricCard("平特肖最大预计赔付", pingte.has_bets ? pingte.max_payout : "暂无下注",
       pingte.has_bets ? "仅按前六个平码生肖，最多六个不同生肖同时命中" : "请先添加平特一肖记录")}
     ${metricCard("平特肖最差净盈亏", pingte.has_bets ? pingte.worst_net : "暂无下注",
@@ -1473,7 +1719,7 @@ function renderRisk(rows, control) {
   const temaScenario = tema.has_bets
     ? `<p class="risk-scenario"><strong>特码最高风险号码：</strong>${showValue(tema.scenario)}</p>` : "";
 
-  box.innerHTML = overviewHtml + ruleNote
+  box.innerHTML = renderRiskDeductionEditor(riskInfo) + overviewHtml + ruleNote
     + `<section class="risk-control-section"><h3>平特肖风险（只看前六个平码生肖）</h3>
        <p class="risk-section-desc">每个生肖沿用当前赔率设置计算赔付贡献；整体最坏情景按前六个平码最多出现六个不同生肖估算。</p>
        ${pingteScenario}${pingteTable}</section>`
