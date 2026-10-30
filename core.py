@@ -416,7 +416,8 @@ class DrawResult:
     raw_text: str = ""
     numbers: List[int] = field(default_factory=list)
     special: Optional[int] = None
-    zodiac_set: Set[str] = field(default_factory=set)
+    zodiac_set: Set[str] = field(default_factory=set)  # 前六个平码生肖，保留旧口径
+    zodiac_set_7: Set[str] = field(default_factory=set)  # 前六个平码 + 第七个特码，共七个号码的生肖
     tail_set: Set[int] = field(default_factory=set)
     pingma_numbers: List[int] = field(default_factory=list)
     pingma_set: Set[int] = field(default_factory=set)
@@ -435,7 +436,7 @@ class DrawResult:
             return "未输入有效开奖号码"
         nums = ",".join(fmt_code(n) for n in self.numbers)
         pingma = ",".join(fmt_code(n) for n in self.pingma_numbers)
-        zods = ",".join(sorted(self.zodiac_set, key=lambda x: ZODIAC_ORDER.index(x)))
+        zods = ",".join(sorted(self.zodiac_set_7 or self.zodiac_set, key=lambda x: ZODIAC_ORDER.index(x)))
         tails = ",".join(str(t) + "尾" for t in sorted(self.tail_set))
         return f"开奖号码：{nums}；平码：{pingma}；特码：{fmt_code(self.special)}（{self.special_zodiac}/{self.special_tail}尾/{self.special_color}）；平特肖：{zods}；平特尾：{tails}"
 
@@ -1596,11 +1597,13 @@ def parse_draw_result(raw_text: str, year_animal: str) -> DrawResult:
         result.special = nums[-1]
     result.pingma_set = set(result.pingma_numbers)
     if len(nums) < 7:
-        result.warnings.append("少于 7 个开奖号码：默认最后一个号码为特码，平特肖/平特尾/连肖仅统计其前面的号码")
+        result.warnings.append("少于 7 个开奖号码：默认最后一个号码为特码；平特肖/连肖按已输入号码生肖结算，平特尾仍只统计其前面的平码")
     n_to_z = build_number_to_zodiac(year_animal)
-    # 平特肖、平特尾、连肖、连尾只使用平码生肖/尾数。
-    # 特码生肖另由 special_zodiac 表示，不直接加入平肖命中集合。
+    # 平特肖、连肖按全部最多七个开奖号码（六个平码 + 第七个特码）的生肖结算。
+    # zodiac_set 保留前六个平码生肖集合，供其他旧口径逻辑继续使用。
+    # 平特尾仍然只使用前六个平码尾数，不包含第七个特码。
     result.zodiac_set = {n_to_z[n] for n in result.pingma_numbers}
+    result.zodiac_set_7 = {n_to_z[n] for n in result.numbers}
     result.tail_set = {n % 10 for n in result.pingma_numbers}
     result.special_zodiac = n_to_z[result.special]
     result.special_tail = result.special % 10
@@ -1702,7 +1705,7 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
 
     if play == "平特一肖":
         animals = _split_selection_animals(group.selection_text)
-        hit = [a for a in animals if a in draw.zodiac_set]
+        hit = [a for a in animals if a in draw.zodiac_set_7]
         if hit:
             parts = []; payout = 0.0
             for animal in hit:
@@ -1828,7 +1831,7 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
         for combo_tuple in combo_list:
             animals = list(combo_tuple)
             combo_name = "".join(animals)
-            if all(a in draw.zodiac_set for a in animals):
+            if all(a in draw.zodiac_set_7 for a in animals):
                 odds = _lianxiao_odds(animals, odds_config)
                 hit_combos.append(combo_name)
                 odds_parts.append(f"{combo_name}{_odds_label(odds)}")
@@ -2022,7 +2025,7 @@ def build_risk_control(records: Sequence[OrderRecord], year_animal: str,
                        odds_config=None, rebate_config=None) -> Dict[str, object]:
     """
     Summarize two separate exposures:
-    - 平特肖: worst possible payout when up to six distinct zodiac signs occur among the first six main numbers.
+    - 平特肖: worst possible payout when up to seven distinct zodiac signs occur among all seven drawn numbers.
     - 特码: inspect each of the 49 possible special numbers using the existing settlement rules.
 
     Net result uses the same house-side convention as the risk table:
@@ -2108,10 +2111,10 @@ def build_risk_control(records: Sequence[OrderRecord], year_animal: str,
                 pingte_unknown_odds = True
                 pingte_scenarios.append(f"{region}：待填赔率")
             else:
-                # Any six distinct zodiac signs can occur in the six main numbers.
+                # Any seven distinct zodiac signs can occur across the seven drawn numbers.
                 # Sort by their combined payout contribution to produce the worst payout scenario.
                 selected.sort(key=lambda animal: (-payouts_by_animal[animal], ZODIAC_ORDER.index(animal)))
-                worst_animals = selected[:6]
+                worst_animals = selected[:7]
                 worst_payout = sum(payouts_by_animal[animal] for animal in worst_animals)
                 pingte_max_payout_total += worst_payout
                 pingte_worst_net_total += worst_payout + pingte_rebate - pingte_stake
@@ -2294,14 +2297,14 @@ def export_xlsx(path: str, records: Sequence[OrderRecord], year_animal: str,
             if not d or not d.is_valid: return "未输入"
             if item == "开奖号码": return ",".join(fmt_code(n) for n in d.numbers)
             if item == "特码": return f"{fmt_code(d.special)} / {d.special_zodiac} / {d.special_tail}尾 / {d.special_color}"
-            if item == "平特一肖": return ",".join(sorted(d.zodiac_set, key=lambda x: ZODIAC_ORDER.index(x)))
+            if item == "平特一肖": return ",".join(sorted(d.zodiac_set_7 or d.zodiac_set, key=lambda x: ZODIAC_ORDER.index(x)))
             if item == "平特尾": return ",".join(str(t)+"尾" for t in sorted(d.tail_set))
             if item == "提示": return "；".join(d.warnings)
             return ""
         for item in ["开奖号码", "特码", "平特一肖", "平特尾", "提示"]:
             draw_info_rows.append([item, _draw_cell(macau_draw, item), _draw_cell(hk_draw, item)])
         draw_info_rows.extend([
-            ["说明", "澳门按澳门开奖结算；香港按香港开奖结算；未标注默认澳门。", "各肖按特肖结算并合并到特肖；最终盈亏 = 赔付 + 回水 - 下单金额。"],
+            ["说明", "澳门按澳门开奖结算；香港按香港开奖结算；未标注默认澳门。", "平特肖/连肖按七个开奖号码生肖结算；二中二/三中三只按前六个平码；最终盈亏 = 赔付 + 回水 - 下单金额。"],
             ["当前赔率", odds_config_summary(odds_config), ""],
             ["当前回水", rebate_config_summary(rebate_config), ""],
         ])
@@ -2312,6 +2315,8 @@ def export_xlsx(path: str, records: Sequence[OrderRecord], year_animal: str,
 
     rule_rows: List[List[object]] = [["项目", "内容"]]
     rule_rows.append(["当前生肖年份", f"{year_animal}年（01 属{year_animal}）"])
+    rule_rows.append(["生肖结算", "平特肖和连肖按全部七个开奖号码（六个平码 + 第七个特码）对应的生肖判断。"])
+    rule_rows.append(["二中二/三中三结算", "继续只按前六个平码判断，第七个特码不参与命中。"])
     rule_rows.append(["连肖结算", "逐组用分号分隔，只判断固定组；复试/复式使用组合展开。"])
     rule_rows.append(["赔率规则", odds_config_summary(odds_config)])
     rule_rows.append(["回水规则", rebate_config_summary(rebate_config)])
