@@ -472,12 +472,59 @@ def _replace_cn_after_each(match: re.Match) -> str:
     return f"各{amount}"
 
 
+# 微信/群聊记录里常见的“昵称 + 时间”头，粘贴整段聊天时会混进下注文本。
+CHAT_TIME_RE = re.compile(
+    r"^\s*(?:(?:今天|昨天|前天|星期[一二三四五六日天])\s*)?"
+    r"(?:\d{4}\s*[年\-/]\s*\d{1,2}\s*[月\-/]\s*\d{1,2}\s*日?)?\s*"
+    r"(?:上午|下午|中午|晚上|凌晨|早上)?\s*"
+    r"\d{1,2}\s*[:：]\s*\d{1,2}\s*$"
+)
+CHAT_ACK_RE = re.compile(r"^\s*1\s*[。.!！]?\s*$")
+
+
+def strip_chat_headers(raw_text: str) -> str:
+    """去掉聊天记录的昵称/时间头与“1”这类应答，并在消息之间插入分段符。
+
+    只删除明确像聊天头的行：
+    - 独立的时间行（2026年11月02日 18:57 / 18:57 / 昨天 18:57）；
+    - 紧挨着时间行、且不含数字的短昵称行；
+    - 只有“1”的应答行。
+    删除的时间行会替换成“|”，避免两条消息的号码行被当成同一笔下注合并。
+    """
+    text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    kept: List[str] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            kept.append(line)
+            continue
+        if CHAT_TIME_RE.fullmatch(stripped):
+            kept.append("|")
+            continue
+        if CHAT_ACK_RE.fullmatch(stripped):
+            continue
+        next_line = ""
+        for following in lines[index + 1:]:
+            if following.strip():
+                next_line = following.strip()
+                break
+        if (next_line and CHAT_TIME_RE.fullmatch(next_line)
+                and not re.search(r"\d", stripped) and len(stripped) <= 24):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def preprocess_text(raw: str) -> str:
     text = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
     text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
     text = text.replace("：", ":").replace("～", "~").replace("—", "~").replace("–", "~").replace("－", "-")
     text = text.replace("快", "块").replace("買", "买").replace("¥", "元")
     text = text.replace("颗", "各").replace("个号", "各号").replace("每个号", "各号")
+    # “每个3块 / 每位3 / 每只5”是“各”的常见口语写法；
+    # “每个号 / 每个号码”仍走上面的“各号”路径，不受这条规则影响。
+    text = re.sub(rf"每\s*(?:个|位|只)\s*(?=[0-9]|{CN_NUMBER_RE})", "各", text)
 
     def _ge_amount_from_ge(match: re.Match) -> str:
         raw_amount = match.group(1)
@@ -794,6 +841,67 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
     def amount_value(text: str) -> float:
         return float(cn_to_number(text)) if re.fullmatch(CN_NUMBER_RE, text or "") else float(text)
 
+    def _split_trailing_amount(text: str) -> Optional[Tuple[str, str]]:
+        """把“号码串 + 末尾金额”拆开；拆不出来返回 None。
+
+        支持：五不中 04 06 05 11 12 200 / 04.06.05.11.12 200 / 0406051112 200 /
+              04 06 05 11 12=200 / 04 06 05 11 12各200
+        """
+        tail = (text or "").strip()
+        if not tail:
+            return None
+        amount_pat = rf"\d+(?:\.\d+)?|{CN_NUMBER_RE}"
+        m = re.fullmatch(rf"(?P<nums>.*?)[\s,，、；;]+(?P<amount>{amount_pat})\s*", tail)
+        if m and m.group("nums").strip():
+            return m.group("nums").strip(), m.group("amount")
+        m = re.fullmatch(rf"(?P<nums>.*?)(?:各组|每组|组|各)\s*(?P<amount>{amount_pat})\s*", tail)
+        if m and m.group("nums").strip():
+            return m.group("nums").strip(), m.group("amount")
+        m = re.fullmatch(rf"(?P<nums>[0-9][0-9\s,，、.~\-]*?)[~=](?P<amount>{amount_pat})\s*", tail)
+        if m and m.group("nums").strip():
+            return m.group("nums").strip(), m.group("amount")
+        return None
+
+    def _selection_numbers(text: str) -> Optional[List[int]]:
+        """解析“04 06 05 / 0406051112 / 04.06.05”这类号码串；有非法号码或重复就返回 None。"""
+        tokens = [token for token in re.split(r"[\s,，、.。;；/]+", (text or "").strip()) if token]
+        if not tokens:
+            return None
+        nums: List[int] = []
+        for token in tokens:
+            if re.fullmatch(r"\d{1,2}", token):
+                value = int(token)
+                if not 1 <= value <= 49:
+                    return None
+                nums.append(value)
+                continue
+            # 连写的两位数号码，例如 0406051112 = 04 06 05 11 12
+            if re.fullmatch(r"\d{4,14}", token) and len(token) % 2 == 0:
+                for index in range(0, len(token), 2):
+                    value = int(token[index:index + 2])
+                    if not 1 <= value <= 49:
+                        return None
+                    nums.append(value)
+                continue
+            return None
+        if len(set(nums)) != len(nums):
+            return None
+        return nums
+
+    # ===== 0. 玩法前置：五不中 04 06 05 11 12 200 =====
+    # 号码个数与玩法名必须对得上，否则宁可放弃匹配，交给后面的通用解析并给出提示。
+    m = re.fullmatch(r"\s*(七不中|六不中|五不中)\s*[:：]?\s*(?P<tail>.+?)\s*", segment)
+    if m:
+        expected = {"五不中": 5, "六不中": 6, "七不中": 7}[m.group(1)]
+        split = _split_trailing_amount(m.group("tail"))
+        if split:
+            numbers = _selection_numbers(split[0])
+            if numbers and len(numbers) == expected:
+                return [BetGroup([], amount_value(split[1]), m.group(1), segment, m.group(1),
+                                 "fixed", ",".join(fmt_code(n) for n in numbers), 1)], [], True
+            # 认得出是“不中”，但号码数量对不上：宁可整条不解析，也不要降级成特码总单算错钱。
+            return [], [f"{m.group(1)} 的号码数量或格式不正确，已跳过：{segment}"], True
+
     # ===== 1. 平特5-9尾各600 =====
     m = re.fullmatch(rf"(?:平特一肖|平特肖|平特|尾数平特|平特尾)((?:[0-9]尾)+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
@@ -811,8 +919,10 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
         return [BetGroup([], amount_value(m.group(2)), "六肖中", segment, "六肖中", "fixed",
                          ",".join(list(m.group(1))), 1)], [], True
 
-    # ===== 3. 波色 =====
-    m = re.fullmatch(rf"((?:(?:红波|蓝波|绿波|红|蓝|绿)(?:单|双|大|小)?)+){amount_re}{suffix_re}", clean)
+    # ===== 3. 波色（支持“波色 红 100”这种玩法前置写法）=====
+    color_clean = re.sub(r"^(?:波色|色波)\s*[:：]?\s*(?=[红蓝绿单双大小])", "", segment)
+    color_clean = re.sub(r"[\s,，、。.;；:#井@]+", "", color_clean)
+    m = re.fullmatch(rf"((?:(?:红波|蓝波|绿波|红|蓝|绿)(?:单|双|大|小)?)+){amount_re}{suffix_re}", color_clean)
     if m:
         selection = m.group(1)
         amount = amount_value(m.group(2))
@@ -822,7 +932,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             return [BetGroup(nums, amount, "波色", segment, "波色", "fixed", display, 1)], [], True
 
     # ===== 4. 大小单双 =====
-    m = re.fullmatch(rf"(?:大小单双)?(单数|双数|大数|小数|单|双|大|小){amount_re}{suffix_re}", clean)
+    m = re.fullmatch(rf"(?:大小单双)?(单数|双数|大数|小数|单|双|大|小){amount_re}{suffix_re}", color_clean)
     if m:
         cat = m.group(1)[0]
         amount = amount_value(m.group(2))
@@ -1401,19 +1511,21 @@ def _parse_multiline_pingma_blocks(
 
 
 def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
+    # 粘贴整段聊天记录时，先把昵称/时间头和“1”这类应答剥掉，避免被当成号码或玩法。
+    source_text = strip_chat_headers(raw_text)
     # 先单独处理“二中二/三中三”的分行逐组格式。
     # 必须在 preprocess_text() 之前处理，因为 preprocess_text()
     # 会把换行转换成“|”，原来的玩法头和后续号码会被拆散。
     multiline_groups, multiline_warnings, remaining_raw = (
-        _parse_multiline_pingma_blocks(raw_text, year_animal)
+        _parse_multiline_pingma_blocks(source_text, year_animal)
     )
 
     # 只在剥离了多行三中三/二中二区块时，才需要预处理两份文本。
     if multiline_groups:
         normalized = preprocess_text(remaining_raw)
-        normalized_full = preprocess_text(raw_text)
+        normalized_full = preprocess_text(source_text)
     else:
-        normalized = preprocess_text(raw_text)
+        normalized = preprocess_text(source_text)
         normalized_full = normalized
 
     parsed = ParsedBet(
@@ -1421,8 +1533,11 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
         normalized_text=normalized_full,
     )
 
-    if not (raw_text or "").strip():
-        parsed.warnings.append("输入内容为空")
+    if not re.sub(r"[\s|]+", "", source_text):
+        parsed.warnings.append(
+            "输入内容为空" if not (raw_text or "").strip()
+            else "只识别到聊天记录的昵称/时间，没有可解析的下注内容"
+        )
         return parsed
 
     if multiline_groups:

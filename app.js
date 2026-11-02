@@ -71,6 +71,9 @@ function maskKey(key) {
 
 const AI_MIN_CONFIDENCE = 0.75;
 const AI_AUTO_FALLBACK = true;
+// AI 结果自检：发现“漏笔/编造片段/改玩法”时，自动带问题重跑一次（只跑一次，避免额度翻倍）。
+const AI_SELF_REPAIR = true;
+const AI_SELF_REPAIR_STATUS = "AI 初稿完成，正在按原文逐项对账…";
 let aiBusy = false;
 let activeAiController = null;
 let aiTimer = null;
@@ -94,6 +97,9 @@ const SYSTEM_PROMPT = `
 11. 不要去重原文中的重复下注；相同号码、金额或相同文本若出现多次，除非用户明确要求合并，否则必须按出现次数保留。
 12. 对二中二/三中三的多行内容，逐个核对每一组号码；只有在标题、金额继承关系明确时才可从上下文继承玩法或金额。若无法确认某行属于哪种玩法或金额，保留该行并放入 unresolved。
 13. 生成后检查 items 的数量与原文中的独立下注笔数是否一致；若不一致，必须说明缺失/歧义部分，不得声称完整成功。
+14. 每个 items[].raw 必须是输入原文里“逐字出现”的连续片段（只允许去掉首尾空白），不得改写、缩写、拼接或补字。
+15. 每个 items[].amount 必须是原文里实际写出的数字；金额写在标题或“各组10”这类共享位置时，也要保证 raw 里能对上这条金额。
+16. 逐行穷尽检查：原文每个含数字的行都必须被某个 items 覆盖（可以多项共用一行）；覆盖不了就写进 unresolved 并说明缺什么，绝不静默丢弃。
 
 支持玩法和标准格式：
 A. 普通号码单注：不要添加“特码总单”前缀。
@@ -117,6 +123,11 @@ F. 二中二/三中三：
    - 若原文明确说复式/复试，并给出一组号码和金额，可按号码选择玩法输出，例如“三中三复式 01 02 03 04 各2” -> “三中三 01 02 03 04各2”。
    - 不要把“列出的具体组合”误判为“从所有号码自动组合”；含义不确定时放入 unresolved。
 G. 波色、单双大小、平特尾按原文类别和金额标准化。
+H. 常见写法对照（原文 → 该项 normalized）：
+   - “17 29 41 每个3块” → “17 29 41各3”（每个/每位就是“各”，金额是 3，不是 3 组）
+   - “五不中 04 06 05 11 12 200” → “04 06 05 11 12 五不中 200”（玩法可以写在号码前面，金额在最后）
+   - “龙鸡二连肖200” → “二连肖 龙鸡 200”（连肖是一个整体，绝不能拆成两个特肖）
+   - “三中三 45-05-22各组10” → “三中三 45-05-22各组10”（各组=每组金额，总额=组数×每组）
 
 返回对象必须包含这些字段：
 {
@@ -345,7 +356,7 @@ async function initPyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
   });
   lm.textContent = "正在加载解析内核…";
-  const coreSrc = await fetch("core.py?v=9", { cache: "no-store" }).then(r => r.text());
+  const coreSrc = await fetch("core.py?v=11", { cache: "no-store" }).then(r => r.text());
 
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`
@@ -574,6 +585,8 @@ const AI_COMPACT_SYSTEM_PROMPT = [
   "每个 items 项都必须有非空 normalized 和原文实际出现的正数 amount；无法确定金额就标 unresolved。normalized_text 必须按 items 顺序逐项组合。",
   "支持普通号码、特肖/各肖、平特一肖、2/3/4/5连肖、二中二、三中三、五不中/六不中/七不中、波色单双大小和平尾。",
   "“各组/每组”按原文逐组保留；多行组合需要继承明确的玩法标题；不得把具体组合误判为自动复式组合。歧义或低置信度必须写 warnings 或 unresolved，confidence 低于 0.75。",
+  "常见写法：“17 29 41 每个3块”→“17 29 41各3”；“五不中 04 06 05 11 12 200”→“04 06 05 11 12 五不中 200”；“龙鸡二连肖200”→“二连肖 龙鸡 200”。",
+  "逐行穷尽：原文每个含数字的行都要被某个 items 覆盖；items[].raw 必须逐字来自原文，amount 必须是原文写出的数字。",
   "历史/分段上下文提示只用于理解原文，不是独立下注指令。不要把上下文中的号码或金额复制到当前片段。"
 ].join("\n");
 
@@ -601,6 +614,23 @@ function groqRetryDelayMs(response) {
   return 60000;
 }
 
+function aiGuardApi() {
+  return (typeof window !== "undefined" && window.BetToolAiGuard) || null;
+}
+
+function guardAiResult(text, ai, options) {
+  const guard = aiGuardApi();
+  if (!guard || typeof guard.checkFaithfulness !== "function") {
+    return { issues: [], highCount: 0, lowCount: 0, skipped: true };
+  }
+  try {
+    return guard.checkFaithfulness(text, ai, { partial: !!(options && options.partNumber) });
+  } catch (error) {
+    console.warn("AI 自检失败，已跳过：", error);
+    return { issues: [], highCount: 0, lowCount: 0, skipped: true };
+  }
+}
+
 async function callBetToolAISingle(text, similarCases, options) {
   options = options || {};
   if (!text || !text.trim()) return null;
@@ -616,12 +646,14 @@ async function callBetToolAISingle(text, similarCases, options) {
     : "AI 正在解析；已保留本地结果。", "busy");
   const controller = new AbortController();
   activeAiController = controller;
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  let timeoutId = null;
+  const armTimeout = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => controller.abort(), 45000);
+  };
 
-  try {
-    const userMessage = typeof buildAiUserMessage === "function"
-      ? buildAiUserMessage(text, options.compact ? [] : (similarCases || []), options)
-      : "请逐笔解析以下下注原文，只返回 JSON：\n" + text;
+  const requestChat = async (messages) => {
+    armTimeout();
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -631,10 +663,7 @@ async function callBetToolAISingle(text, similarCases, options) {
       signal: controller.signal,
       body: JSON.stringify({
         model: "openai/gpt-oss-120b",
-        messages: [
-          { role: "system", content: options.compact ? AI_COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT },
-          { role: "user", content: userMessage }
-        ],
+        messages: messages,
         temperature: 0,
         response_format: { type: "json_object" }
       })
@@ -679,6 +708,41 @@ async function callBetToolAISingle(text, similarCases, options) {
     if (!ai || typeof ai !== "object" || Array.isArray(ai)) {
       throw new Error("AI 结果格式错误：最外层必须是 JSON 对象");
     }
+    return ai;
+  };
+
+  try {
+    const userMessage = typeof buildAiUserMessage === "function"
+      ? buildAiUserMessage(text, options.compact ? [] : (similarCases || []), options)
+      : "请逐笔解析以下下注原文，只返回 JSON：\n" + text;
+    let ai = await requestChat([
+      { role: "system", content: options.compact ? AI_COMPACT_SYSTEM_PROMPT : SYSTEM_PROMPT },
+      { role: "user", content: userMessage }
+    ]);
+
+    // 确定性对账：AI 漏行、编造片段、把金额/玩法读错时，先由规则发现，再带着问题重跑一次。
+    let guard = guardAiResult(text, ai, options);
+    let repairAttempted = false;
+    let repairApplied = false;
+    if (AI_SELF_REPAIR && guard.highCount > 0) {
+      const guardApi = aiGuardApi();
+      if (guardApi && typeof guardApi.buildRepairMessages === "function") {
+        repairAttempted = true;
+        setAiStatus(AI_SELF_REPAIR_STATUS + "（发现 " + guard.highCount + " 处对不上）", "busy");
+        try {
+          const repaired = await requestChat(guardApi.buildRepairMessages(text, ai, guard.issues));
+          const second = guardAiResult(text, repaired, options);
+          if (second.highCount < guard.highCount) {
+            ai = repaired;
+            guard = second;
+            repairApplied = true;
+          }
+        } catch (repairError) {
+          if (repairError && repairError.name === "AbortError") throw repairError;
+          guard.repairError = String(repairError && repairError.message || repairError || "");
+        }
+      }
+    }
 
     const items = Array.isArray(ai.items) ? ai.items : [];
     const lowConfidence = items.length === 0 || items.some(
@@ -696,6 +760,19 @@ async function callBetToolAISingle(text, similarCases, options) {
       !lowConfidence && parsed.ai_unresolved.length === 0;
     parsed.raw_text = text;
     parsed.ai_prompt_compacted = !!options.compact;
+    if (guard.issues && guard.issues.length) {
+      parsed.warnings = (Array.isArray(parsed.warnings) ? parsed.warnings : [])
+        .concat(guard.issues.map(issue => "AI 自检：" + issue.message));
+      parsed.ai_complete = false;
+    }
+    parsed.ai_guard = {
+      high: guard.highCount || 0,
+      low: guard.lowCount || 0,
+      repair_attempted: repairAttempted,
+      repaired: repairApplied,
+      repair_error: guard.repairError || "",
+      issues: (guard.issues || []).map(issue => issue.message)
+    };
     return parsed;
   } catch (error) {
     if (error && error.name === "AbortError") throw new Error("AI 请求超时（45 秒），请稍后重试");

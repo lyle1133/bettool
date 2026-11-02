@@ -1,3 +1,4 @@
+import re
 import unittest
 
 from core import parse_bet
@@ -196,6 +197,142 @@ class CoreParserRegressionTests(unittest.TestCase):
             "mixed input must retain the source order rather than moving multiline groups to the front",
         )
         self.assertEqual(parsed.total, 33)
+
+    def test_mei_ge_is_treated_as_each_number_amount(self):
+        for raw in (
+            "17 29 41 每个3块",
+            "17 29 41每个3",
+            "17 29 41 每个 3 块",
+            "17 29 41 每位3块",
+            "17 29 41 每只3",
+        ):
+            with self.subTest(raw=raw):
+                parsed = parse_bet(raw, year_animal="马")
+                self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+                group = parsed.groups[0]
+                self.assertEqual(group.numbers, [17, 29, 41])
+                self.assertEqual(group.amount, 3)
+                self.assertEqual(group.total, 9)
+                self.assertEqual(parsed.total, 9)
+                self.assertFalse(parsed.warnings, parsed.warnings)
+
+    def test_mei_ge_with_chinese_amount(self):
+        parsed = parse_bet("17 29 41 每位 十 块", year_animal="马")
+        self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+        self.assertEqual(parsed.groups[0].numbers, [17, 29, 41])
+        self.assertEqual(parsed.groups[0].amount, 10)
+        self.assertEqual(parsed.total, 30)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
+    def test_play_first_wu_liu_qi_bu_zhong(self):
+        cases = {
+            "五不中 04 06 05 11 12 200": ("五不中", 200),
+            "五不中 0406051112 200": ("五不中", 200),
+            "五不中 04.06.05.11.12 200": ("五不中", 200),
+            "五不中:04,06,05,11,12 200": ("五不中", 200),
+            "五不中 04 06 05 11 12=200": ("五不中", 200),
+            "五不中 04 06 05 11 12 200块": ("五不中", 200),
+            "五不中 04 06 05 11 12 两百": ("五不中", 200),
+            "五不中 04 06 05 11 12 二百米": ("五不中", 200),
+            "六不中 01 02 03 04 05 06 100": ("六不中", 100),
+            "七不中 01 02 03 04 05 06 07 50": ("七不中", 50),
+        }
+        for raw, (play, amount) in cases.items():
+            with self.subTest(raw=raw):
+                parsed = parse_bet(raw, year_animal="马")
+                self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+                group = parsed.groups[0]
+                self.assertEqual(group.play_type, play)
+                self.assertEqual(group.amount, amount)
+                self.assertEqual(group.total, amount)
+                self.assertEqual(parsed.total, amount)
+                self.assertFalse(parsed.warnings, parsed.warnings)
+                self.assertEqual(len(core_split_numbers(group.selection_text)),
+                                 {"五不中": 5, "六不中": 6, "七不中": 7}[play])
+
+    def test_play_first_wu_bu_zhong_rejects_wrong_number_count(self):
+        parsed = parse_bet("五不中 04 06 05 11 200", year_animal="马")
+        self.assertEqual(parsed.groups, [], "号码数量不对时不应降级成特码总单")
+        self.assertTrue(
+            any("五不中" in warning for warning in parsed.warnings),
+            parsed.warnings,
+        )
+        self.assertEqual(parsed.total, 0)
+
+    def test_wu_bu_zhong_numbers_first_still_works(self):
+        parsed = parse_bet("04.06.05.11.12 五不中 200文", year_animal="马")
+        self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+        self.assertEqual(parsed.groups[0].play_type, "五不中")
+        self.assertEqual(parsed.total, 200)
+
+    def test_bo_se_prefix(self):
+        for raw in ("波色 红 100", "波色红100", "色波 红波 100"):
+            with self.subTest(raw=raw):
+                parsed = parse_bet(raw, year_animal="马")
+                self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+                self.assertEqual(parsed.groups[0].play_type, "波色")
+                self.assertEqual(parsed.groups[0].total, 100)
+
+    def test_chat_headers_and_ack_lines_are_ignored(self):
+        raw = (
+            "温柔不是姐的范\n"
+            "2026年11月02日 18:57\n"
+            "07.19.43.22.34.46各15\n"
+            "31.10.01.13.25.37.49.04.16.20.40各12\n"
+            "\n"
+            "lyle\n"
+            "2026年11月02日 18:58\n"
+            "1\n"
+            "\n"
+            "温柔不是姐的范\n"
+            "2026年11月02日 19:30\n"
+            "49各25\n"
+        )
+        parsed = parse_bet(raw, year_animal="马")
+        self.assertEqual(len(parsed.groups), 3, parsed.warnings)
+        self.assertEqual(parsed.total, 90 + 132 + 25)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
+    def test_chat_headers_do_not_merge_two_messages(self):
+        raw = (
+            "温柔不是姐的范\n"
+            "2026年11月02日 21:04\n"
+            "27.24.22.46.23.21.45.各20\n"
+            "lyle\n"
+            "2026年11月02日 21:05\n"
+            "1\n"
+            "温柔不是姐的范\n"
+            "2026年11月02日 21:06\n"
+            "25各100\n"
+        )
+        parsed = parse_bet(raw, year_animal="马")
+        self.assertEqual([group.total for group in parsed.groups], [140, 100], parsed.warnings)
+        self.assertEqual(parsed.total, 240)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
+    def test_timestamp_only_input_reports_no_bets(self):
+        parsed = parse_bet("温柔不是姐的范\n2026年11月02日 18:57\n", year_animal="马")
+        self.assertEqual(parsed.groups, [])
+        self.assertTrue(any("聊天记录" in warning for warning in parsed.warnings),
+                        parsed.warnings)
+
+    def test_new_formats_mix_with_existing_lines(self):
+        parsed = parse_bet(
+            "17 29 41 每个3块\n"
+            "五不中 04 06 05 11 12 200\n"
+            "波色 红 100",
+            year_animal="马",
+        )
+        self.assertEqual([group.play_type for group in parsed.groups],
+                         ["特码总单", "五不中", "波色"], parsed.warnings)
+        self.assertEqual([group.total for group in parsed.groups], [9, 200, 100])
+        self.assertEqual(parsed.total, 309)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
+
+def core_split_numbers(selection_text):
+    """测试辅助：把 "04,06,05,11,12" 拆回号码，用于检查号码个数。"""
+    return [int(token) for token in re.findall(r"\d{1,2}", selection_text or "")]
 
 
 if __name__ == "__main__":
