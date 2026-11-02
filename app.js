@@ -356,7 +356,7 @@ async function initPyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
   });
   lm.textContent = "正在加载解析内核…";
-  const coreSrc = await fetch("core.py?v=12", { cache: "no-store" }).then(r => r.text());
+  const coreSrc = await fetch("core.py?v=13", { cache: "no-store" }).then(r => r.text());
 
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`
@@ -1293,13 +1293,112 @@ function onClearInput() {
 }
 async function onClearAll() {
   if (!state.records.length) return;
-  if (!confirm("确定清空全部记录？")) return;
+  if (!confirm("确定清空全部 " + state.records.length + " 条记录？\n\n清空后无法恢复，建议先到「设置」页导出备份。")) return;
   state.records = [];
   saveLocal();
   updateTotals();
   renderRecords();
   refreshSummary();
   toast("已清空");
+}
+
+// ==================== 记录备份 ====================
+function backupApi() {
+  return (typeof window !== "undefined" && window.BetToolBackup) || null;
+}
+
+function backupStamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + "-" +
+    pad(now.getHours()) + pad(now.getMinutes());
+}
+
+function onExportBackup() {
+  const api = backupApi();
+  if (!api) { toast("备份模块未加载，请刷新页面"); return; }
+  const payload = api.build({
+    year: state.year,
+    records: state.records,
+    odds: state.odds,
+    rebate: state.rebate,
+    riskDeductions: state.riskDeductions,
+    currentUser: state.currentUser,
+    winFilterUser: state.winFilterUser,
+    macau: $("#macau-draw") ? $("#macau-draw").value : "",
+    hk: $("#hk-draw") ? $("#hk-draw").value : ""
+  });
+  const blob = new Blob([JSON.stringify(payload, null, 1)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "bettool-backup-" + backupStamp() + ".json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast("已导出 " + state.records.length + " 条记录");
+}
+
+function onImportBackupClick() {
+  const input = $("#backup-file");
+  if (!input) { toast("找不到文件选择框"); return; }
+  input.value = "";
+  input.click();
+}
+
+async function onImportBackup(input) {
+  const api = backupApi();
+  if (!api) { toast("备份模块未加载，请刷新页面"); return; }
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  try {
+    const content = await file.text();
+    const parsed = api.parse(content);
+    if (!parsed.ok) {
+      toast("导入失败：" + parsed.error, 3500);
+      return;
+    }
+    const when = parsed.exported_at
+      ? parsed.exported_at.slice(0, 16).replace("T", " ")
+      : "未知时间";
+    if (!confirm("导入 " + parsed.count + " 条记录（导出于 " + when + "）？\n当前 " +
+                 state.records.length + " 条记录会被覆盖，建议先导出备份。")) return;
+    applyBackupState(parsed.state);
+    toast("已导入 " + parsed.count + " 条记录");
+  } catch (error) {
+    toast("读取文件失败：" + (error && error.message || error), 3500);
+  } finally {
+    if (input) input.value = "";
+  }
+}
+
+function applyBackupState(data) {
+  if (!data) return;
+  if (data.year) state.year = data.year;
+  state.records = (data.records || []).map((record, index) => ({ ...record, seq: index + 1 }));
+  state.odds = { ...DEFAULT_ODDS, ...(data.odds || {}) };
+  state.rebate = { ...DEFAULT_REBATE, ...(data.rebate || {}) };
+  state.riskDeductions = (data.riskDeductions || [])
+    .map(normalizeRiskDeductionEntry).filter(Boolean);
+  if (data.currentUser) state.currentUser = data.currentUser;
+  if (data.winFilterUser) state.winFilterUser = data.winFilterUser;
+
+  const yearSelect = $("#year-select");
+  if (yearSelect && state.year &&
+      Array.from(yearSelect.options).some(option => option.value === state.year)) {
+    yearSelect.value = state.year;
+  }
+  if ($("#macau-draw")) $("#macau-draw").value = data.macau || "";
+  if ($("#hk-draw")) $("#hk-draw").value = data.hk || "";
+
+  saveLocal();
+  renderRecords();
+  updateTotals();
+  refreshSummary();
+  refreshWin();
+  refreshRisk();
+  renderSettings();
 }
 
 function deleteRecord(seq) {

@@ -902,6 +902,18 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             # 认得出是“不中”，但号码数量对不上：宁可整条不解析，也不要降级成特码总单算错钱。
             return [], [f"{m.group(1)} 的号码数量或格式不正确，已跳过：{segment}"], True
 
+    # ===== 0.5 玩法前置：六肖中 鼠牛虎兔龙蛇 100 =====
+    # 六肖中目前没有结算分支，但至少要按“六肖中”记账，不能降级成 6 组特码总单。
+    m = re.fullmatch(
+        rf"\s*六肖中\s*[:：]?\s*(?P<animals>[鼠牛虎兔龙蛇马羊猴鸡狗猪\s,，、]+?)\s*"
+        rf"(?:各组|每组|组|各)?\s*(?P<amount>\d+(?:\.\d+)?|{CN_NUMBER_RE})\s*{suffix_re}\s*",
+        segment)
+    if m:
+        animals = [ch for ch in m.group("animals") if ch in ZODIAC_ORDER]
+        if len(animals) == 6 and len(set(animals)) == 6:
+            return [BetGroup([], amount_value(m.group("amount")), "六肖中", segment, "六肖中",
+                             "fixed", ",".join(animals), 1)], [], True
+
     # ===== 1. 平特5-9尾各600 =====
     m = re.fullmatch(rf"(?:平特一肖|平特肖|平特|尾数平特|平特尾)((?:[0-9]尾)+)(?:各)?{amount_re}{suffix_re}", clean)
     if m:
@@ -1515,6 +1527,18 @@ def _parse_multiline_pingma_blocks(
     return groups, warnings, "\n".join(remaining_lines)
 
 
+SETTLE_SUPPORTED_PLAYS = {
+    "特码总单", "单号", "各肖", "特肖", "平特一肖", "波色", "尾数平特",
+    "五不中", "六不中", "七不中", "二中二", "三中三",
+}
+
+
+def is_settle_supported(play: str) -> bool:
+    """结算是否能处理这个玩法；连肖按名字里是否含“连肖”判断。"""
+    text = str(play or "")
+    return text in SETTLE_SUPPORTED_PLAYS or "连肖" in text
+
+
 def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
     # 粘贴整段聊天记录时，先把昵称/时间头和“1”这类应答剥掉，避免被当成号码或玩法。
     source_text = strip_chat_headers(raw_text)
@@ -1648,6 +1672,13 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
 
     if not parsed.groups:
         parsed.warnings.append("没有生成任何有效押注内容")
+    else:
+        unsupported = []
+        for group in parsed.groups:
+            if not is_settle_supported(group.play_type) and group.play_type not in unsupported:
+                unsupported.append(group.play_type)
+        for play_type in unsupported:
+            parsed.warnings.append(f"玩法「{play_type}」暂不支持结算，请先人工核对：{play_type}")
     return parsed
 
 
@@ -1793,7 +1824,7 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
     odds_config = normalize_odds_config(odds_config)
     play = group.play_type
 
-    if play == "特码总单":
+    if play in {"特码总单", "单号"}:
         if draw.special in group.numbers:
             stake = group.amount / len(group.numbers) if group.billing_mode == "zodiac_split" and group.numbers else group.amount
             odds = odds_config.get("tema")

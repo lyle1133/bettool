@@ -25,10 +25,12 @@ jobs:
           node --check app.js
           node --check learning.js
           node --check ai-guard.js
+          node --check backup.js
           node tests/test_learning_logic.js
           node tests/test_ai_resilience.js
           node tests/test_risk_deductions.js
           node tests/test_ai_guard.js
+          node tests/test_backup.js
       - name: Run parser regression tests
         run: python -m unittest discover -s tests -v
       - name: Test private cloud-sync Worker

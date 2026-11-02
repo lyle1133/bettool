@@ -344,6 +344,19 @@ class CoreParserRegressionTests(unittest.TestCase):
         self.assertEqual(parsed.groups[0].multiplier, 2)
         self.assertEqual(parsed.total, 10)
 
+    def test_six_zodiac_center_is_not_downgraded(self):
+        for raw in ("六肖中 鼠牛虎兔龙蛇 100", "鼠牛虎兔龙蛇六肖中 100"):
+            with self.subTest(raw=raw):
+                parsed = parse_bet(raw, year_animal="马")
+                self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+                group = parsed.groups[0]
+                self.assertEqual(group.play_type, "六肖中")
+                self.assertEqual(group.total, 100)
+                self.assertTrue(
+                    any("不支持结算" in warning for warning in parsed.warnings),
+                    parsed.warnings,
+                )
+
     def test_new_formats_mix_with_existing_lines(self):
         parsed = parse_bet(
             "17 29 41 每个3块\n"
