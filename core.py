@@ -1279,7 +1279,11 @@ _MULTILINE_PINGMA_HEADS: Tuple[Tuple[str, str, int], ...] = (
     ("三中三", "三中三", 3), ("3中3", "三中三", 3),
     ("二中二", "二中二", 2), ("2中2", "二中二", 2),
 )
-_MULTILINE_PINGMA_HEAD_PREFIX = r"^\s*(?:(?:平码|复试|复式)\s*)*"
+# 玩法标题前可能带地区/场次前缀，例如“新奥三中三”“澳门二中二”。
+_PINGMA_REGION_LABELS = "新澳门|新澳|新奥|澳门|澳|香港|港|老门|新门|门|新"
+_MULTILINE_PINGMA_HEAD_PREFIX = (
+    rf"^\s*(?:(?:{_PINGMA_REGION_LABELS})\s*[:：]?\s*)*(?:(?:平码|复试|复式)\s*)*"
+)
 
 
 def _parse_multiline_pingma_blocks(
@@ -1341,6 +1345,7 @@ def _parse_multiline_pingma_blocks(
         if not m:
             return None
         matched_head = re.sub(r"[\s:：]+", "", line[m.start():m.end()])
+        matched_head = re.sub(rf"^(?:(?:{_PINGMA_REGION_LABELS}))+", "", matched_head)
         matched_head = re.sub(r"^(?:(?:平码|复试|复式))+", "", matched_head)
         for head, play, choose in _MULTILINE_PINGMA_HEADS:
             if matched_head == head:

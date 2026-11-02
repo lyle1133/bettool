@@ -316,6 +316,34 @@ class CoreParserRegressionTests(unittest.TestCase):
         self.assertTrue(any("聊天记录" in warning for warning in parsed.warnings),
                         parsed.warnings)
 
+    def test_prefixed_multiline_pingma_header(self):
+        parsed = parse_bet(
+            "新奥三中三\n"
+            "31-21-14    07-15-47\n"
+            "03-38-08    36-10-43\n"
+            "16-40-31    21-28-44\n"
+            "12-31-26    03-14-16\n"
+            "10-34-40    10-29-30\n"
+            "07-31-25    19-01-39\n"
+            "03-27-40    18-31-44\n"
+            "37-41-45    18-37-41各组10",
+            year_animal="马",
+        )
+        self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+        group = parsed.groups[0]
+        self.assertEqual(group.play_type, "三中三")
+        self.assertEqual(group.multiplier, 16)
+        self.assertEqual(group.amount, 10)
+        self.assertEqual(group.total, 160)
+        self.assertFalse(parsed.warnings, parsed.warnings)
+
+    def test_region_prefixed_two_of_two_header(self):
+        parsed = parse_bet("澳门二中二\n01-02\n03-04各组5", year_animal="马")
+        self.assertEqual(len(parsed.groups), 1, parsed.warnings)
+        self.assertEqual(parsed.groups[0].play_type, "二中二")
+        self.assertEqual(parsed.groups[0].multiplier, 2)
+        self.assertEqual(parsed.total, 10)
+
     def test_new_formats_mix_with_existing_lines(self):
         parsed = parse_bet(
             "17 29 41 每个3块\n"
