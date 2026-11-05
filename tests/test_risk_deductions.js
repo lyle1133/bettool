@@ -173,4 +173,34 @@ assert.throws(
   /号码必须在 01–49/
 );
 
+// 生肖也能直接抛掉：马年 马 = 01,13,25,37,49；猴 = 11,23,35,47
+assert.deepEqual(
+  Array.from(vm.runInContext('parseRiskDeductionNumbers("马")', context)),
+  [1, 13, 25, 37, 49]
+);
+assert.deepEqual(
+  Array.from(vm.runInContext('parseRiskDeductionNumbers("马猴 07")', context)),
+  [1, 7, 11, 13, 23, 25, 35, 37, 47, 49]
+);
+assert.deepEqual(
+  Array.from(vm.runInContext('parseRiskDeductionNumbers("鼠")', context)),
+  [7, 19, 31, 43]
+);
+assert.throws(
+  () => vm.runInContext('parseRiskDeductionNumbers("马x")', context),
+  /格式不正确/
+);
+
+// 生肖抛掉会按展开后的每个号码扣减
+(() => {
+  const numbers = Array.from(vm.runInContext('parseRiskDeductionNumbers("马")', context));
+  const result = runScenario(
+    [record([numberGroup(numbers, 100)])],
+    [{ id: 9, numbers, amount: 30, region: "澳门" }]
+  );
+  assert.equal(result.totalApplied, 150);
+  assert.equal(result.records[0].groups.length, 5);
+  assert.ok(result.records[0].groups.every(group => group.amount === 70));
+})();
+
 console.log("Risk throw-off deduction tests passed");

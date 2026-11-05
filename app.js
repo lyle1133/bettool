@@ -1575,6 +1575,23 @@ async function refreshWin() {
 }
 
 // ==================== 风险页：抛掉金额调整 ====================
+const RISK_ZODIAC_ORDER = "鼠牛虎兔龙蛇马羊猴鸡狗猪";
+
+// 按当前年份把生肖换算成实际号码；与 core.build_zodiac_map 同一口径：
+// 号码 01 对应当年生肖，之后每个号码往前推一个生肖。
+function zodiacNumbersFor(animal) {
+  const yearAnimal = YEAR_MAP[state.year] || "马";
+  const yearIndex = RISK_ZODIAC_ORDER.indexOf(yearAnimal);
+  const animalIndex = RISK_ZODIAC_ORDER.indexOf(String(animal || "").charAt(0));
+  if (yearIndex < 0 || animalIndex < 0) return [];
+  const offset = (yearIndex - animalIndex + 12) % 12;
+  const numbers = [];
+  for (let n = 1; n <= 49; n++) {
+    if ((n - 1) % 12 === offset) numbers.push(n);
+  }
+  return numbers;
+}
+
 function normalizeRiskDeductionEntry(entry, index = 0) {
   if (!entry || typeof entry !== "object") return null;
   const numbers = [...new Set((Array.isArray(entry.numbers) ? entry.numbers : [])
@@ -1588,6 +1605,7 @@ function normalizeRiskDeductionEntry(entry, index = 0) {
     id,
     numbers,
     amount,
+    source: String(entry.source == null ? "" : entry.source).slice(0, 80),
     region: entry.region === "香港" ? "香港" : "澳门"
   };
 }
@@ -1596,16 +1614,52 @@ function parseRiskDeductionNumbers(raw) {
   const text = String(raw || "")
     .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
     .trim();
-  if (!text) throw new Error("请填写需要抛掉金额的号码");
+  if (!text) throw new Error("请填写需要抛掉金额的号码或生肖");
   const tokens = text.split(/[\s,，、;；/|~\-—–]+/).filter(Boolean);
-  if (!tokens.length || tokens.some(token => !/^\d{1,2}$/.test(token))) {
+  if (!tokens.length) {
     throw new Error("号码格式不正确，请用空格、逗号或短横线分隔，例如 01, 08, 19");
   }
-  const numbers = tokens.map(Number);
-  if (numbers.some(n => !Number.isInteger(n) || n < 1 || n > 49)) {
-    throw new Error("号码必须在 01–49 之间");
+  const numbers = [];
+  for (const token of tokens) {
+    if (/^\d{1,2}$/.test(token)) {
+      const number = Number(token);
+      if (!Number.isInteger(number) || number < 1 || number > 49) {
+        throw new Error("号码必须在 01–49 之间");
+      }
+      numbers.push(number);
+      continue;
+    }
+    if (new RegExp("^[" + RISK_ZODIAC_ORDER + "]+$").test(token)) {
+      for (const animal of token) {
+        const expanded = zodiacNumbersFor(animal);
+        if (!expanded.length) throw new Error("无法识别生肖：" + animal);
+        numbers.push(...expanded);
+      }
+      continue;
+    }
+    throw new Error("格式不正确：可填号码（01）或生肖（马、马猴），用空格或逗号分隔");
   }
-  return [...new Set(numbers)];
+  return [...new Set(numbers)].sort((a, b) => a - b);
+}
+
+function updateRiskDeductionPreview() {
+  const box = $("#risk-deduction-preview");
+  if (!box) return;
+  const raw = String($("#risk-deduction-numbers")?.value || "").trim();
+  const amount = Number($("#risk-deduction-amount")?.value || 0);
+  if (!raw) {
+    box.textContent = "可填号码，也可填生肖：例如 马 = 01、13、25、37、49（按当前年份换算）。";
+    return;
+  }
+  try {
+    const numbers = parseRiskDeductionNumbers(raw);
+    const per = Number.isFinite(amount) && amount > 0 ? amount : 0;
+    box.textContent = "将抛掉 " + numbers.length + " 个号码：" +
+      numbers.map(n => String(n).padStart(2, "0")).join("、") +
+      (per ? "；每个扣 " + fmtNum(per) + "，合计请求 " + fmtNum(per * numbers.length) : "");
+  } catch (error) {
+    box.textContent = error.message;
+  }
 }
 
 function calculateRiskDeductions() {
@@ -1734,9 +1788,12 @@ function renderRiskDeductionEditor(riskInfo = {}) {
             "，实际抵扣 " + fmtNum(numberStat.applied) +
             "，剩余数字下注 " + fmtNum(left);
         }).join("；");
+        const label = entry.source
+          ? entry.source + "（" + entry.numbers.map(n => String(n).padStart(2, "0")).join("、") + "）"
+          : entry.numbers.map(n => String(n).padStart(2, "0")).join("、");
         return '<div class="risk-deduction-row">' +
           '<div class="risk-deduction-main">' +
-            '<strong>' + escapeHtml(entry.region + " · " + entry.numbers.map(n => String(n).padStart(2, "0")).join("、")) + '</strong>' +
+            '<strong>' + escapeHtml(entry.region + " · " + label) + '</strong>' +
             '<span>每个号码抛掉 ' + escapeHtml(fmtNum(entry.amount)) + '；' + escapeHtml(numberNotes) + '</span>' +
             '<small>已抵扣 ' + escapeHtml(fmtNum(stat.applied)) + ' / ' +
               escapeHtml(fmtNum(stat.requested)) + '，未匹配金额 ' +
@@ -1749,12 +1806,13 @@ function renderRiskDeductionEditor(riskInfo = {}) {
 
   return '<section class="risk-control-section risk-deduction-editor">' +
     '<h3>抛掉金额（实时风险扣减）</h3>' +
-    '<p class="risk-section-desc">例如：01 原本下注 100，填写号码 01、抛掉金额 90，风险计算会按 01 剩余下注 10 模拟。金额是每个所选号码各扣多少；最多扣到 0。此设置只影响风险页，真实记录、汇总、中奖结算和导出不变，保存在当前浏览器。</p>' +
+    '<p class="risk-section-desc">例如：01 原本下注 100，填写号码 01、抛掉金额 90，风险计算会按 01 剩余下注 10 模拟。也可以直接写生肖：填「马」会按当前年份展开成 01、13、25、37、49（马年）。金额是每个号码各扣多少；最多扣到 0。此设置只影响风险页，真实记录、汇总、中奖结算和导出不变，保存在当前浏览器。</p>' +
     '<div class="risk-deduction-fields">' +
-      '<label>抛掉的号码<input id="risk-deduction-numbers" type="text" inputmode="text" placeholder="例如：01 或 01, 08, 19"></label>' +
-      '<label>每个号码抛掉金额<input id="risk-deduction-amount" type="text" inputmode="text" autocomplete="off" placeholder="例如：90"></label>' +
+      '<label>抛掉的号码 / 生肖<input id="risk-deduction-numbers" type="text" inputmode="text" placeholder="例如：01 08，或 马、马猴" oninput="updateRiskDeductionPreview()"></label>' +
+      '<label>每个号码抛掉金额<input id="risk-deduction-amount" type="text" inputmode="text" autocomplete="off" placeholder="例如：90" oninput="updateRiskDeductionPreview()"></label>' +
       '<label>地区<select id="risk-deduction-region"><option value="澳门">澳门</option><option value="香港">香港</option></select></label>' +
     '</div>' +
+    '<div id="risk-deduction-preview" class="field-help risk-deduction-preview">可填号码，也可填生肖：例如 马 = 01、13、25、37、49（按当前年份换算）。</div>' +
     '<button type="button" class="primary full risk-deduction-add" onclick="addRiskDeduction()">加入并立即重算风险</button>' +
     list +
     '<p class="field-help risk-deduction-summary">本次请求抛掉 ' + escapeHtml(fmtNum(riskInfo.totalRequested || 0)) +
@@ -1787,6 +1845,7 @@ function addRiskDeduction() {
     id: Date.now() + (++riskDeductionIdCounter),
     numbers,
     amount,
+    source: numbersInput.value.trim(),
     region: regionInput.value
   });
   if (!entry) {
@@ -1934,7 +1993,6 @@ function renderRisk(rows, control, riskInfo = {}) {
     + `<section class="risk-control-section"><h3>特码风险（逐个假设第七个号码）</h3>
        <p class="risk-section-desc">特码按 01–49 分别模拟，使用现有特码、特肖和波色赔率设置。平特肖不计入这个表。</p>
        ${temaScenario}${temaTable}</section>`;
-  decorateTables(box);
 }
 
 async function onExport() {

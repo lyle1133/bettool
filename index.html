@@ -647,14 +647,18 @@ body.has-preview #tab-input{padding-bottom:calc(var(--tabbar-h) + 168px + var(--
 .summary-stats span{display:block;font-size:10.5px;color:var(--muted)}
 .summary-stats strong{font-size:17px;font-variant-numeric:tabular-nums}
 @media (max-width:720px){
-  .table-wrap{overflow:visible;border:0;background:none}
-  .table-wrap table.data-table{min-width:0}
-  .data-table,.data-table tbody,.data-table tr,.data-table td{display:block;width:100%}
-  .data-table thead{display:none}
-  .data-table tr{background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:8px}
-  .data-table td{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border:0;font-size:13px;white-space:normal}
-  .data-table td::before{content:attr(data-label);color:var(--muted);font-size:12px;flex-shrink:0}
-  .data-table td:first-child{font-weight:700;font-size:14px}
+  /* 汇总 / 中奖：宽表格变卡片；风险页保持原来的表格，可横向滚动 */
+  #summary-content .table-wrap,#win-content .table-wrap{overflow:visible;border:0;background:none}
+  #summary-content .table-wrap table.data-table,#win-content .table-wrap table.data-table{min-width:0}
+  #summary-content .data-table,#summary-content .data-table tbody,#summary-content .data-table tr,#summary-content .data-table td,
+  #win-content .data-table,#win-content .data-table tbody,#win-content .data-table tr,#win-content .data-table td{display:block;width:100%}
+  #summary-content .data-table thead,#win-content .data-table thead{display:none}
+  #summary-content .data-table tr,#win-content .data-table tr{background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:8px}
+  #summary-content .data-table td,#win-content .data-table td{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border:0;font-size:13px;white-space:normal}
+  #summary-content .data-table td::before,#win-content .data-table td::before{content:attr(data-label);color:var(--muted);font-size:12px;flex-shrink:0}
+  #summary-content .data-table td:first-child,#win-content .data-table td:first-child{font-weight:700;font-size:14px}
+  #risk-content .table-wrap{overflow-x:auto}
+  #risk-content .table-wrap table.data-table{min-width:620px}
 }
 
 /* 设置 */
@@ -914,7 +918,7 @@ nav.tabbar button:before{font-size:17px}
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <script src="ai-guard.js?v=2"></script>
 <script src="backup.js?v=1"></script>
-<script src="app.js?v=28"></script>
+<script src="app.js?v=29"></script>
 <script src="learning.js?v=4"></script>
 </body>
 </html>
