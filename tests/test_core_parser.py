@@ -144,7 +144,7 @@ class CoreParserRegressionTests(unittest.TestCase):
         )
         self.assertEqual(len(parsed.groups), 4, parsed.warnings)
         first = parsed.groups[0]
-        self.assertEqual(first.play_type, "5连肖复试")
+        self.assertEqual(first.play_type, "5连肖")
         self.assertEqual(first.selection_text, "牛,马,猴,猪,虎,蛇")
         self.assertEqual(first.multiplier, 6)
         self.assertEqual(first.amount, 20)

@@ -46,6 +46,38 @@ class RiskColumnOrderTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(len(rows[1]), len(rows[0]))
 
+    def test_risk_rows_keep_macau_and_hong_kong_in_separate_blocks(self):
+        def make(seq, region, text):
+            parsed = parse_bet(text)
+            return OrderRecord(
+                seq=seq,
+                raw_text=parsed.raw_text,
+                bet_content=parsed.content,
+                amount=parsed.total,
+                created_at="2026-11-02 00:00:00",
+                groups=parsed.groups,
+                warnings=parsed.warnings,
+                region=region,
+            )
+
+        records = [
+            make(1, "澳门", "01各5"),
+            make(2, "香港", "02各5"),
+        ]
+        rows = build_risk_rows(records, "马")
+        body = rows[1:]
+        regions = [row[0] for row in body]
+        self.assertEqual(regions.count("[统计] 澳门"), 1, regions[:3])
+        self.assertEqual(regions.count("[统计] 香港"), 1, regions[:3])
+        macau_index = regions.index("[统计] 澳门")
+        hk_index = regions.index("[统计] 香港")
+        self.assertLess(macau_index, hk_index)
+        # 澳门块里的所有数据行都在香港块之前
+        macau_rows = [i for i, name in enumerate(regions) if name == "澳门"]
+        hk_rows = [i for i, name in enumerate(regions) if name == "香港"]
+        self.assertTrue(macau_rows and hk_rows)
+        self.assertLess(max(macau_rows), min(hk_rows))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -113,7 +113,7 @@ C. 平特一肖：例如“平特鸡200块” -> “平特一肖：鸡 200”
 D. 连肖：必须识别“几连 + 生肖 + 金额”，并区分普通连肖与复式连肖。
    - 普通三连：“三连猪蛇牛五十” -> “3连肖：猪蛇牛 50”，总额 50。
    - 复式组合：“复试五连 牛马猴猪虎蛇组合二十”表示 6 个生肖中选五个，共 C(6,5)=6 组，每组 20，总额 120。
-     标准化为“5连肖复试：牛马猴猪虎蛇各20”；不要把生肖转换成该生肖对应的号码，不能输出多组“特码总单”。
+     标准化为“5连肖：牛马猴猪虎蛇各20”；不要把生肖转换成该生肖对应的号码，不能输出多组“特码总单”。
    - 复式连肖金额是每组金额；总额 = 组合数 × 每组金额。不要把总额反写成每组金额。
    - 如果“复试/复式”“几连”“生肖名单”或金额关系无法确认，必须保留为 unresolved，不可猜测。
 E. 五不中/六不中/七不中：例如“04.06.05.11.12 五不中 200文” -> “04 06 05 11 12 五不中 200”
@@ -356,7 +356,7 @@ async function initPyodide() {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
   });
   lm.textContent = "正在加载解析内核…";
-  const coreSrc = await fetch("core.py?v=13", { cache: "no-store" }).then(r => r.text());
+  const coreSrc = await fetch("core.py?v=14", { cache: "no-store" }).then(r => r.text());
 
   pyodide.FS.writeFile("/home/pyodide/core.py", coreSrc);
   await pyodide.runPythonAsync(`

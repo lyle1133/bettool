@@ -1041,7 +1041,8 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             warnings.append(f"连肖数量不合理：{segment}")
             return [], warnings, True
         multiplier = comb(len(animals), choose)
-        play = f"{choose}连肖" if multiplier == 1 else f"{choose}连肖复试"
+        # 复式与普通连肖统一按“N连肖”统计，组数由 multiplier 体现。
+        play = f"{choose}连肖"
         return [BetGroup([], amount, play, segment, play, "fixed", ",".join(animals), multiplier)], warnings, True
 
     combo_text = re.sub(r"[\s:：]", "", segment).replace("免", "兔")
@@ -1222,7 +1223,7 @@ def parse_special_segment(segment: str, year_animal: str = "马") -> Tuple[List[
             return [BetGroup([], amount, f"{choose}连肖", segment, f"{choose}连肖", "fixed", "".join(animals), 1)], [], True
         elif len(animals) > choose:
             multiplier = comb(len(animals), choose)
-            return [BetGroup([], amount, f"{choose}连肖复试", segment, f"{choose}连肖复试", "fixed", ",".join(animals), multiplier)], [], True
+            return [BetGroup([], amount, f"{choose}连肖", segment, f"{choose}连肖", "fixed", ",".join(animals), multiplier)], [], True
 
     # ===== 22. 9尾平特500 =====
     m = re.fullmatch(rf"([0-9])尾(?:平特一肖|平特尾|平特)(?:各)?{amount_re}{suffix_re}", clean)
@@ -2157,17 +2158,29 @@ def build_risk_rows(records: Sequence[OrderRecord], year_animal: str,
                    NUMBER_TO_COLOR.get(n, ""), str(n % 10) + "尾", hit_text, risk_level]
             all_data.append((sort_profit, row))
 
-    all_data.sort(key=lambda item: -item[0])
-    profits = [item[0] for item in all_data if isinstance(item[0], (int, float)) and item[0] != float("inf")]
-    if profits:
-        max_p = max(profits); min_p = min(profits); avg_p = sum(profits) / len(profits)
-        rows.append([
-            "[统计]", f"最大:{fmt_num(max_p)}", f"最小:{fmt_num(min_p)}",
-            f"平均:{fmt_num(avg_p)}", "---", "", "", "", "---", "---", "---", "---",
-        ])
-
-    for _, row in all_data:
-        rows.append(row)
+    # 澳门、香港分开排列：先按地区分组（澳门在上、香港在下），每个地区各带一行统计，
+    # 组内仍按盈亏从高到低排序。
+    grouped: Dict[str, List[Tuple[float, List[object]]]] = {}
+    for item in all_data:
+        grouped.setdefault(str(item[1][0]), []).append(item)
+    ordered_regions: List[str] = []
+    for _profit, row in all_data:
+        name = str(row[0])
+        if name not in ordered_regions:
+            ordered_regions.append(name)
+    for region in ordered_regions:
+        items = grouped[region]
+        items.sort(key=lambda pair: -pair[0])
+        profits = [profit for profit, _row in items
+                   if isinstance(profit, (int, float)) and profit != float("inf")]
+        if profits:
+            max_p = max(profits); min_p = min(profits); avg_p = sum(profits) / len(profits)
+            rows.append([
+                f"[统计] {region}", f"最大:{fmt_num(max_p)}", f"最小:{fmt_num(min_p)}",
+                f"平均:{fmt_num(avg_p)}", "---", "", "", "", "---", "---", "---", "---",
+            ])
+        for _profit, row in items:
+            rows.append(row)
     return rows
 
 
