@@ -445,6 +445,19 @@ function setPreviewBadge(text, kind) {
   badge.className = "badge" + (kind ? " " + kind : "");
 }
 
+function decorateTables(root) {
+  const scope = root || document;
+  if (!scope || typeof scope.querySelectorAll !== "function") return;
+  scope.querySelectorAll("table.data-table").forEach(table => {
+    const headers = Array.from(table.querySelectorAll("thead th")).map(th => th.textContent.trim());
+    table.querySelectorAll("tbody tr").forEach(row => {
+      Array.from(row.children).forEach((cell, index) => {
+        if (cell.tagName === "TD" && headers[index]) cell.setAttribute("data-label", headers[index]);
+      });
+    });
+  });
+}
+
 function renderPreviewEmpty(message) {
   const box = $("#preview-box");
   if (box) {
@@ -473,14 +486,23 @@ function renderPreviewResult(result, sourceLabel) {
     const amount = group.amount === null || group.amount === undefined ? "—" : fmtNum(group.amount);
     const subtotal = group.total === null || group.total === undefined ? "—" : fmtNum(group.total);
     const multiplier = group.multiplier === null || group.multiplier === undefined ? "—" : String(group.multiplier);
-    return '<article class="parsed-group-card">' +
-      '<div class="group-head"><strong>' + escapeHtml(type) + '</strong><span>第 ' + (index + 1) + ' 组</span></div>' +
-      '<div class="group-selection">' + escapeHtml(selection) + '</div>' +
-      '<div class="group-meta">' +
-        '<div><span>单组金额</span><strong>' + escapeHtml(amount) + '</strong></div>' +
-        '<div><span>小计</span><strong>' + escapeHtml(subtotal) + '</strong></div>' +
-        '<div><span>组合/倍数</span><strong>' + escapeHtml(multiplier) + '</strong></div>' +
-      '</div></article>';
+    return '<details class="pg">' +
+      '<summary>' +
+        '<span class="pg-play">' + escapeHtml(type) + '</span>' +
+        '<span class="pg-sel">' + escapeHtml(selection) + '</span>' +
+        '<span class="pg-amount">' + escapeHtml(subtotal) + '</span>' +
+      '</summary>' +
+      '<div class="pg-body">' +
+        '<div class="pg-meta">' +
+          '<div><span>单组金额</span><strong>' + escapeHtml(amount) + '</strong></div>' +
+          '<div><span>小计</span><strong>' + escapeHtml(subtotal) + '</strong></div>' +
+          '<div><span>组数/倍数</span><strong>' + escapeHtml(multiplier) + '</strong></div>' +
+        '</div>' +
+        (selection !== type
+          ? '<details class="pg-raw"><summary>查看这一组的号码原文</summary><pre>' +
+            escapeHtml(selection) + '</pre></details>'
+          : '') +
+      '</div></details>';
   }).join("");
 
   const warningItems = warnings.map(function(item) {
@@ -1191,10 +1213,19 @@ async function doPreview(allowAI = false, forceAI = false, forceChunks = false) 
   }
 
   if (isCurrentRequest()) updateTotals();
+  if (isCurrentRequest() && forceAI && window.innerWidth < 900 &&
+      previewResult && Array.isArray(previewResult.groups) && previewResult.groups.length) {
+    const card = document.querySelector(".result-card");
+    if (card && typeof card.scrollIntoView === "function") {
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 }
 function updateTotals() {
   const previewTotal = previewResult ? fmtNum(previewResult.total || 0) : "—";
   const recordsTotal = state.records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const hasPreview = !!(previewResult && Array.isArray(previewResult.groups) && previewResult.groups.length);
+  if (document.body) document.body.classList.toggle("has-preview", hasPreview);
   const totals = $("#totals");
   if (totals) {
     totals.innerHTML =
@@ -1202,7 +1233,7 @@ function updateTotals() {
       '<span><span>记录合计</span><strong>' + escapeHtml(fmtNum(recordsTotal)) + '</strong></span>';
   }
   const addButton = $("#btn-add");
-  if (addButton) addButton.disabled = !previewResult || !Array.isArray(previewResult.groups) || !previewResult.groups.length;
+  if (addButton) addButton.disabled = !hasPreview;
   const copyButton = $("#btn-copy");
   if (copyButton) copyButton.disabled = !previewResult || !(previewResult.content || previewResult.ai_normalized_text || previewResult.normalized_text);
 }
@@ -1444,14 +1475,13 @@ function renderRecords() {
     const userTag = user ? `<span class="user" data-u="${escapeHtml(user)}">${escapeHtml(user)}</span>` : "";
     const searchText = String(r.bet_content || r.raw_text || "");
     return `<div class="rec-row" title="${escapeHtml(searchText.slice(0,240))}">
-      ${userTag}
-      <span class="seq">#${r.seq}</span>
-      <span class="region">${escapeHtml(r.region || "澳门")}</span>
-      <span class="time">${escapeHtml(timeShort)}</span>
+      <div class="rec-main">${userTag}<span class="rec-text">${escapeHtml(searchText || r.raw_text || "")}</span></div>
       <span class="amount">${escapeHtml(fmtNum(r.amount))}</span>
+      <div class="rec-meta"><span class="seq">#${r.seq}</span><span class="region">${escapeHtml(r.region || "澳门")}</span><span class="time">${escapeHtml(timeShort)}</span></div>
       <button type="button" class="del" onclick="deleteRecord(${Number(r.seq)})" aria-label="删除第 ${Number(r.seq)} 条记录">删</button>
     </div>`;
   }).join("");
+  decorateTables(box);
 }
 
 // ==================== 汇总页 ====================
@@ -1498,6 +1528,7 @@ function renderSubtab(sum) {
   ).join("") + "</tr>").join("");
   box.innerHTML = stats + '<div class="table-wrap"><table class="data-table"><thead><tr>' +
     th + '</tr></thead><tbody>' + tr + '</tbody></table></div>';
+  decorateTables(box);
 }
 // ==================== 中奖页 ====================
 function onRefreshWin() { saveLocal(); refreshWin(); }
@@ -1537,6 +1568,7 @@ async function refreshWin() {
       `<div style="padding:8px;color:var(--accent);font-size:13px;font-weight:600">当前筛选：用户 ${state.winFilterUser}</div>`;
     $("#win-content").innerHTML = title +
       `<div class="table-wrap"><table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+    decorateTables($("#win-content"));
   } catch(e) {
     $("#win-content").innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
   }
@@ -1820,7 +1852,7 @@ function renderRisk(rows, control, riskInfo = {}) {
     ${metricCard("抛掉后风险计入额", control?.total_stake ?? 0,
       "已按号码抛掉金额扣减；未匹配金额不会虚减风险")}
     ${metricCard("平特肖最大预计赔付", pingte.has_bets ? pingte.max_payout : "暂无下注",
-      pingte.has_bets ? "仅按前六个平码生肖，最多六个不同生肖同时命中" : "请先添加平特一肖记录")}
+      pingte.has_bets ? "按七个开奖号码的生肖，最多七个不同生肖同时命中" : "请先添加平特一肖记录")}
     ${metricCard("平特肖最差净盈亏", pingte.has_bets ? pingte.worst_net : "暂无下注",
       pingte.has_bets ? "赔付 + 回水 − 平特肖下注额；正数代表庄家潜在亏损" : "—",
       typeof pingte.worst_net === "number" && pingte.worst_net > 0 ? "risk-card-high" : "")}
@@ -1896,12 +1928,13 @@ function renderRisk(rows, control, riskInfo = {}) {
     ? `<p class="risk-scenario"><strong>特码最高风险号码：</strong>${showValue(tema.scenario)}</p>` : "";
 
   box.innerHTML = renderRiskDeductionEditor(riskInfo) + overviewHtml + ruleNote
-    + `<section class="risk-control-section"><h3>平特肖风险（只看前六个平码生肖）</h3>
-       <p class="risk-section-desc">每个生肖沿用当前赔率设置计算赔付贡献；整体最坏情景按前六个平码最多出现六个不同生肖估算。</p>
+    + `<section class="risk-control-section"><h3>平特肖风险（按全部七个开奖号码的生肖）</h3>
+       <p class="risk-section-desc">每个生肖沿用当前赔率设置计算赔付贡献；最坏情景按七个开奖号码最多出现七个不同生肖估算。</p>
        ${pingteScenario}${pingteTable}</section>`
     + `<section class="risk-control-section"><h3>特码风险（逐个假设第七个号码）</h3>
        <p class="risk-section-desc">特码按 01–49 分别模拟，使用现有特码、特肖和波色赔率设置。平特肖不计入这个表。</p>
        ${temaScenario}${temaTable}</section>`;
+  decorateTables(box);
 }
 
 async function onExport() {
