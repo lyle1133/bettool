@@ -1683,6 +1683,16 @@ def parse_bet(raw_text: str, year_animal: str = "马") -> ParsedBet:
     return parsed
 
 
+_LIANXIAO_REPEAT_RE = re.compile(r"^([2-5])连肖(?:复试|复式)$")
+
+
+def normalize_play_type(play: str) -> str:
+    """把历史记录里的“N连肖复试/复式”并入“N连肖”，用于统计与结算汇总。"""
+    text = str(play or "")
+    match = _LIANXIAO_REPEAT_RE.match(text)
+    return f"{match.group(1)}连肖" if match else text
+
+
 def summarize_orders(records: Sequence[OrderRecord], year_animal: str) -> Tuple[List[List[object]], List[List[object]], List[List[object]], List[List[object]]]:
     n_to_z = build_number_to_zodiac(year_animal)
     number_amount = {n: 0.0 for n in range(1, 50)}
@@ -1690,7 +1700,8 @@ def summarize_orders(records: Sequence[OrderRecord], year_animal: str) -> Tuple[
     play_stats: Dict[str, List[float]] = {}
     for record in records:
         for group in record.groups:
-            stat = play_stats.setdefault(group.play_type, [0.0, 0.0])
+            play = normalize_play_type(group.play_type)
+            stat = play_stats.setdefault(play, [0.0, 0.0])
             stat[0] += group.multiplier if group.billing_mode == "fixed" else 1
             stat[1] += group.total
             if group.billing_mode == "fixed":
@@ -2001,7 +2012,8 @@ def settle_group(group: BetGroup, draw: DrawResult, odds_config=None) -> Tuple[b
 
 
 def settlement_summary_play_type(group: BetGroup) -> str:
-    return "特肖" if group.play_type == "各肖" else group.play_type
+    play = normalize_play_type(group.play_type)
+    return "特肖" if play == "各肖" else play
 
 
 def settle_orders(records: Sequence[OrderRecord], draw, odds_config=None, rebate_config=None) -> Tuple[List[List[object]], List[List[object]]]:

@@ -371,6 +371,23 @@ class CoreParserRegressionTests(unittest.TestCase):
         self.assertFalse(parsed.warnings, parsed.warnings)
 
 
+    def test_legacy_lianxiao_repeat_records_merge_in_summary(self):
+        from core import BetGroup, DrawResult, OrderRecord, settle_orders, summarize_orders
+
+        group = BetGroup([], 50, "3连肖复试", "旧记录", "3连肖复试", "fixed", "龙鸡猪", 1)
+        record = OrderRecord(seq=1, raw_text="旧记录", bet_content="3连肖复试", amount=50,
+                             created_at="", groups=[group], warnings=[])
+        _, _, _, play_rows = summarize_orders([record], "马")
+        names = [row[0] for row in play_rows]
+        self.assertIn("3连肖", names)
+        self.assertNotIn("3连肖复试", names)
+
+        _, summary = settle_orders([record], {"澳门": DrawResult(), "香港": DrawResult()}, {}, {})
+        summary_names = [row[0] for row in summary]
+        self.assertIn("3连肖", summary_names)
+        self.assertNotIn("3连肖复试", summary_names)
+
+
 def core_split_numbers(selection_text):
     """测试辅助：把 "04,06,05,11,12" 拆回号码，用于检查号码个数。"""
     return [int(token) for token in re.findall(r"\d{1,2}", selection_text or "")]
