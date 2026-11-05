@@ -1481,7 +1481,6 @@ function renderRecords() {
       <button type="button" class="del" onclick="deleteRecord(${Number(r.seq)})" aria-label="删除第 ${Number(r.seq)} 条记录">删</button>
     </div>`;
   }).join("");
-  decorateTables(box);
 }
 
 // ==================== 汇总页 ====================
@@ -1528,7 +1527,6 @@ function renderSubtab(sum) {
   ).join("") + "</tr>").join("");
   box.innerHTML = stats + '<div class="table-wrap"><table class="data-table"><thead><tr>' +
     th + '</tr></thead><tbody>' + tr + '</tbody></table></div>';
-  decorateTables(box);
 }
 // ==================== 中奖页 ====================
 function onRefreshWin() { saveLocal(); refreshWin(); }
@@ -1568,7 +1566,6 @@ async function refreshWin() {
       `<div style="padding:8px;color:var(--accent);font-size:13px;font-weight:600">当前筛选：用户 ${state.winFilterUser}</div>`;
     $("#win-content").innerHTML = title +
       `<div class="table-wrap"><table class="data-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
-    decorateTables($("#win-content"));
   } catch(e) {
     $("#win-content").innerHTML = '<div class="empty">计算失败：' + e.message + '</div>';
   }
@@ -1805,7 +1802,11 @@ function renderRiskDeductionEditor(riskInfo = {}) {
     : '<div class="field-help risk-deduction-empty">暂无抛掉金额调整。</div>';
 
   return '<section class="risk-control-section risk-deduction-editor">' +
-    '<h3>抛掉金额（实时风险扣减）</h3>' +
+    '<details class="risk-deduction-details">' +
+    '<summary><span class="rd-title">抛掉金额（实时风险扣减）</span>' +
+      '<span class="rd-hint">已抵扣 ' + escapeHtml(fmtNum(riskInfo.totalApplied || 0)) +
+      ' / 请求 ' + escapeHtml(fmtNum(riskInfo.totalRequested || 0)) + '</span></summary>' +
+    '<div class="rd-body">' +
     '<p class="risk-section-desc">例如：01 原本下注 100，填写号码 01、抛掉金额 90，风险计算会按 01 剩余下注 10 模拟。也可以直接写生肖：填「马」会按当前年份展开成 01、13、25、37、49（马年）。金额是每个号码各扣多少；最多扣到 0。此设置只影响风险页，真实记录、汇总、中奖结算和导出不变，保存在当前浏览器。</p>' +
     '<div class="risk-deduction-fields">' +
       '<label>抛掉的号码 / 生肖<input id="risk-deduction-numbers" type="text" inputmode="text" placeholder="例如：01 08，或 马、马猴" oninput="updateRiskDeductionPreview()"></label>' +
@@ -1819,6 +1820,7 @@ function renderRiskDeductionEditor(riskInfo = {}) {
     '；实际抵扣 ' + escapeHtml(fmtNum(riskInfo.totalApplied || 0)) +
     '；未匹配 ' + escapeHtml(fmtNum(riskInfo.totalUnapplied || 0)) +
     '。只从按号码计费的下注组扣减，不改动特肖、平码组合、平特尾等其他玩法的结算口径。</p>' +
+    '</div></details>' +
   '</section>';
 }
 
@@ -1924,9 +1926,8 @@ function renderRisk(rows, control, riskInfo = {}) {
 
   const ruleNote = `<div class="risk-rule-note">
     <strong>当前结算口径</strong>
-    平特肖、平特尾及连肖类玩法只统计开奖前六个平码号码对应的生肖/尾数；
-    第七个号码按特码单独结算，不会因为特码生肖本身直接命中平特肖。
-    若同一生肖也出现在前六个平码中，该生肖仍按平码命中。
+    平特肖、连肖按全部七个开奖号码（六个平码 + 第七个特码）的生肖结算，第七个号码的生肖也算命中；
+    平特尾只看前六个平码的尾数，第七个特码的尾数不单独触发；二中二/三中三只按平码判断。
   </div>`;
 
   const zodiacRows = Array.isArray(pingte.rows) ? pingte.rows : [];

@@ -517,15 +517,19 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   --card2:#F8FAFD;
   --shadow:0 1px 2px rgba(15,23,42,.04),0 10px 28px rgba(15,23,42,.05);
   --tabbar-h:62px;
+  --dock-h:104px;
 }
 html,body{background:var(--bg);color:var(--text);font-size:15px}
+body{height:100%;min-height:100dvh;padding-bottom:0}
+main{padding-bottom:calc(var(--tabbar-h) + var(--safe-bottom))}
+nav.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:50}
 header.app-header{min-height:56px;padding:10px 14px;background:rgba(255,255,255,.94);border-bottom:1px solid var(--border);backdrop-filter:saturate(160%) blur(12px)}
 .brand-mark{width:34px;height:34px;border-radius:11px;font-size:13px;background:linear-gradient(150deg,#3B82F6,#1D4ED8);box-shadow:0 6px 16px rgba(37,99,235,.26)}
 .brand-copy h1{font-size:15px;font-weight:700;letter-spacing:0}
 .brand-copy p{font-size:11px;margin-top:2px;color:var(--muted)}
 #status{font-size:11px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:#1D4ED8;border:0}
 main{background:var(--bg)}
-.tab{padding:14px 14px calc(var(--tabbar-h) + var(--safe-bottom) + 28px);gap:12px;width:min(100%,860px)}
+.tab{padding:14px 14px calc(16px + var(--safe-bottom));gap:12px;width:min(100%,860px)}
 .tab-heading h2{font-size:20px;letter-spacing:-.3px}
 .tab-heading p{font-size:12.5px;margin-top:3px;color:var(--muted)}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow)}
@@ -615,10 +619,10 @@ body.has-preview .action-dock{display:block}
 .action-dock .totals strong{font-size:15px;font-variant-numeric:tabular-nums}
 .action-dock .preview-actions{margin-top:8px;gap:8px}
 .action-dock .preview-actions button{min-height:48px;font-size:15px}
-body.has-preview #tab-input{padding-bottom:calc(var(--tabbar-h) + 168px + var(--safe-bottom))}
+body.has-preview #tab-input{padding-bottom:calc(var(--dock-h) + 24px + var(--safe-bottom))}
 @media (min-width:900px){
   .action-dock{position:static;display:block;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none}
-  body.has-preview #tab-input{padding-bottom:calc(var(--tabbar-h) + var(--safe-bottom) + 28px)}
+  body.has-preview #tab-input{padding-bottom:calc(16px + var(--safe-bottom))}
 }
 
 /* 记录列表 */
@@ -646,19 +650,15 @@ body.has-preview #tab-input{padding-bottom:calc(var(--tabbar-h) + 168px + var(--
 .summary-stats>div{background:#F8FAFD;border:1px solid var(--line);border-radius:12px;padding:10px}
 .summary-stats span{display:block;font-size:10.5px;color:var(--muted)}
 .summary-stats strong{font-size:17px;font-variant-numeric:tabular-nums}
+/* 汇总 / 中奖 / 风险：保持表格原样，手机上整体滚动、表格内横向滚动 */
+#summary-content,#win-content,#risk-content{flex:none;min-height:0;overflow:visible;background:none;border:0;padding:0}
+#risk-content .table-wrap table.data-table{min-width:560px}
+#summary-content .table-wrap table.data-table{min-width:520px}
+#win-content .table-wrap table.data-table{min-width:560px}
 @media (max-width:720px){
-  /* 汇总 / 中奖：宽表格变卡片；风险页保持原来的表格，可横向滚动 */
-  #summary-content .table-wrap,#win-content .table-wrap{overflow:visible;border:0;background:none}
-  #summary-content .table-wrap table.data-table,#win-content .table-wrap table.data-table{min-width:0}
-  #summary-content .data-table,#summary-content .data-table tbody,#summary-content .data-table tr,#summary-content .data-table td,
-  #win-content .data-table,#win-content .data-table tbody,#win-content .data-table tr,#win-content .data-table td{display:block;width:100%}
-  #summary-content .data-table thead,#win-content .data-table thead{display:none}
-  #summary-content .data-table tr,#win-content .data-table tr{background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:8px}
-  #summary-content .data-table td,#win-content .data-table td{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border:0;font-size:13px;white-space:normal}
-  #summary-content .data-table td::before,#win-content .data-table td::before{content:attr(data-label);color:var(--muted);font-size:12px;flex-shrink:0}
-  #summary-content .data-table td:first-child,#win-content .data-table td:first-child{font-weight:700;font-size:14px}
-  #risk-content .table-wrap{overflow-x:auto}
-  #risk-content .table-wrap table.data-table{min-width:620px}
+  .data-table th{padding:7px 8px;font-size:11px}
+  .data-table td{padding:7px 8px;font-size:12.5px}
+  .table-wrap{max-width:100%}
 }
 
 /* 设置 */
@@ -681,6 +681,15 @@ body.has-preview #tab-input{padding-bottom:calc(var(--tabbar-h) + 168px + var(--
 .learning-source{background:#F7F9FC;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px;max-height:140px;overflow:auto;white-space:pre-wrap}
 
 /* 风险页浅色化 */
+.risk-deduction-details summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:4px 0;min-height:36px}
+.risk-deduction-details summary::-webkit-details-marker{display:none}
+.risk-deduction-details summary::after{content:"▾";color:var(--subtle);font-size:12px}
+.risk-deduction-details[open] summary::after{content:"▴"}
+.rd-title{font-size:15px;font-weight:700}
+.rd-hint{font-size:11.5px;color:var(--muted);margin-left:auto}
+.rd-body{padding-top:8px}
+.risk-deduction-preview{margin-top:8px;line-height:1.5}
+.risk-deduction-add{min-height:46px}
 .risk-control-section,.risk-deduction-row,.risk-control-card,.risk-summary,.risk-card-high,.risk-card-low,.risk-card-mid,.risk-card-unknown{background:#fff;border-color:var(--border)}
 .risk-section-desc,.risk-rule-note{color:var(--muted)}
 
@@ -918,7 +927,7 @@ nav.tabbar button:before{font-size:17px}
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <script src="ai-guard.js?v=2"></script>
 <script src="backup.js?v=1"></script>
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 <script src="learning.js?v=4"></script>
 </body>
 </html>
